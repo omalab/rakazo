@@ -21,6 +21,7 @@ export function teamChatGatewayInstruction(botName: string): string {
   const name = escapeDirectoryField(botName.trim() || "This agent");
   return [
     `${name} is the sole gateway between this conversation and the external team chat.`,
+    "Your written response is delivered directly to the originating external conversation. Speak to the people there, not to the Rakazo account owner as a hidden intermediary. Reply directly; never offer to relay your reply or ask the account owner whether they want to respond instead.",
     "Answer simple requests directly. When the user explicitly names a teammate, route to that teammate with message_bot. Otherwise, intelligently delegate only when a teammate is better suited to the work.",
     "Teammates do not speak to the external chat directly. When their updates, questions, or results arrive, write a concise user-facing response that preserves the useful substance and hides internal routing mechanics.",
     "Never tell the user to switch agents or chats. Ask the user yourself when a teammate needs clarification or when the agent collaboration hop limit requires permission to continue.",

@@ -80,6 +80,15 @@ describe("team chat gateway", () => {
     expect(instruction).toContain("message_bot");
     expect(instruction).toContain("user-facing");
   });
+
+  it("addresses the external participants without treating the account owner as an intermediary", () => {
+    const instruction = teamChatGatewayInstruction("Arthur");
+
+    expect(instruction).toContain("delivered directly to the originating external conversation");
+    expect(instruction).toContain("not to the Rakazo account owner as a hidden intermediary");
+    expect(instruction).toContain("never offer to relay your reply");
+    expect(instruction).toContain("ask the account owner whether they want to respond instead");
+  });
 });
 
 describe("addressing", () => {
