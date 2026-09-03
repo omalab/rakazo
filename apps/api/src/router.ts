@@ -741,7 +741,6 @@ export function createRouter(deps: RouterDeps) {
             where: {
               id: input.sectionId,
               spaceId: context.actor.spaceId,
-              userId: context.actor.userId,
             },
             select: { id: true },
           });
@@ -965,7 +964,6 @@ export function createRouter(deps: RouterDeps) {
               where: {
                 id: previousSecretId,
                 spaceId: context.actor.spaceId,
-                userId: context.actor.userId,
                 kind: "webhook",
               },
             });
@@ -1013,7 +1011,6 @@ export function createRouter(deps: RouterDeps) {
             where: {
               id: input.sectionId,
               spaceId: context.actor.spaceId,
-              userId: context.actor.userId,
             },
             select: { id: true },
           });
@@ -2673,7 +2670,6 @@ export function createRouter(deps: RouterDeps) {
             where: {
               id: input.botId,
               spaceId: context.actor.spaceId,
-              userId: context.actor.userId,
             },
             select: { id: true },
           });
@@ -2695,7 +2691,6 @@ export function createRouter(deps: RouterDeps) {
                 where: {
                   id: input.botId,
                   spaceId: context.actor.spaceId,
-                  userId: context.actor.userId,
                 },
                 select: { id: true },
               }),
@@ -2733,7 +2728,6 @@ export function createRouter(deps: RouterDeps) {
               where: {
                 id: input.botId,
                 spaceId: context.actor.spaceId,
-                userId: context.actor.userId,
               },
               select: { id: true },
             });
@@ -3064,7 +3058,6 @@ export function createRouter(deps: RouterDeps) {
             where: {
               id: input.botId,
               spaceId: context.actor.spaceId,
-              userId: context.actor.userId,
               archivedAt: null,
             },
             select: { id: true },
@@ -3102,7 +3095,6 @@ export function createRouter(deps: RouterDeps) {
             where: {
               id: input.botId,
               spaceId: context.actor.spaceId,
-              userId: context.actor.userId,
               archivedAt: null,
             },
             select: { id: true },
@@ -3396,7 +3388,6 @@ export function createRouter(deps: RouterDeps) {
             botId: input.botId,
             groupId: null,
             spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
           },
         });
         return rows.map((row) => ({
