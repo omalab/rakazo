@@ -534,8 +534,20 @@ export const builtinAgentTools: ConnectorTool[] = [
           type: "string",
           description: "Optional extra system instructions for the helper.",
         },
+        max_tool_calls: {
+          type: "integer",
+          minimum: 1,
+          maximum: 40,
+          description: "Maximum tool calls for this bounded assignment.",
+        },
+        max_duration_seconds: {
+          type: "integer",
+          minimum: 5,
+          maximum: 600,
+          description: "Maximum elapsed seconds for this bounded assignment.",
+        },
       },
-      required: ["name", "task"],
+      required: ["name", "task", "max_tool_calls", "max_duration_seconds"],
     },
   },
   {
