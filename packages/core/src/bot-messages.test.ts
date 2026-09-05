@@ -95,6 +95,23 @@ describe("addressing", () => {
     expect(resolveBotAddress(bots, { name: "  analyst " })?.id).toBe("b_2");
   });
 
+  it("resolves James, James Baker, and JB to one exact teammate", () => {
+    const teammates = [{ id: "b_james", name: "James Baker" }];
+
+    expect(resolveBotAddress(teammates, { name: "James" })?.id).toBe("b_james");
+    expect(resolveBotAddress(teammates, { name: "James Baker" })?.id).toBe("b_james");
+    expect(resolveBotAddress(teammates, { name: "jb" })?.id).toBe("b_james");
+  });
+
+  it("refuses James aliases when they could identify different teammates", () => {
+    const teammates = [
+      { id: "b_james", name: "James" },
+      { id: "b_jb", name: "JB" },
+    ];
+
+    expect(resolveBotAddress(teammates, { name: "James Baker" })).toBeUndefined();
+  });
+
   it("refuses an ambiguous name rather than guessing", () => {
     const twins = [
       { id: "b_1", name: "Ana" },

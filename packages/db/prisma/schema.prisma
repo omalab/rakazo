@@ -558,6 +558,8 @@ model Run {
   botOutcomeReturnedAt DateTime?
   messagingMirroredAt  DateTime?
   teamChatMirroredAt   DateTime?
+  teamChatInputClaimedAt DateTime?
+  teamChatInputMirroredAt DateTime?
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
   attempts             Attempt[]
@@ -647,11 +649,14 @@ model ExternalMessage {
   lastError              String?
   providerReplyHandle    String?
   deliveredAt            DateTime?
+  answerRunId             String?
+  answerMessageId         String?
   createdAt              DateTime             @default(now())
   updatedAt              DateTime             @updatedAt
 
   @@unique([externalConversationId, providerEventId])
   @@index([status, nextAttemptAt])
+  @@index([answerRunId])
   @@map("external_messages")
 }
 

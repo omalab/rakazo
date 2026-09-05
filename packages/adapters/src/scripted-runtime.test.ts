@@ -49,6 +49,16 @@ describe("inferScript message_bot", () => {
   });
 });
 
+describe("inferScript human continuation", () => {
+  it("continues after an answer instead of repeating the original ask", () => {
+    const script = inferScript("ask me which city to use\n\nHuman answer: Paris");
+
+    expect(script).toEqual([
+      { assistant: "thanks — continuing with your answer.", complete: true },
+    ]);
+  });
+});
+
 describe("ScriptedAgentRuntime executionIds", () => {
   it("gives repeated tools distinct executionIds within a run", async () => {
     const runtime = new ScriptedAgentRuntime();

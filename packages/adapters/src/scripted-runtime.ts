@@ -149,6 +149,9 @@ export function inferScript(
       },
     ];
   }
+  if (lower.includes("human answer:")) {
+    return [{ assistant: "thanks — continuing with your answer.", complete: true }];
+  }
   // Before every content-based intent so payload text cannot steal the branch.
   if (lower.includes("message the bot named") || lower.includes("message bot named")) {
     const name = namedBot(prompt) ?? "Peer";
