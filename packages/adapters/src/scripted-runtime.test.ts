@@ -50,11 +50,27 @@ describe("inferScript message_bot", () => {
 });
 
 describe("inferScript human continuation", () => {
-  it("continues after an answer instead of repeating the original ask", () => {
+  it("continues from the latest answer instead of repeating the original ask", () => {
     const script = inferScript("ask me which city to use\n\nHuman answer: Paris");
 
     expect(script).toEqual([
-      { assistant: "thanks — continuing with your answer.", complete: true },
+      {
+        assistant: "on it. i will work this in the background and come back with a result.\n\ndone. i handled: Paris",
+      },
+      { files: [{ path: "notes/last-task.md", content: "# Task\n\nParis\n" }], complete: true },
+    ]);
+  });
+
+  it("can ask another question when the latest answer requests one", () => {
+    const script = inferScript(
+      "ask me which city to use\n\nHuman answer: ask me which city to use again",
+    );
+
+    expect(script).toEqual([
+      {
+        assistant: "i need a decision before i continue.",
+        ask: { text: "Which city should I use?", detail: "Reply with one city name." },
+      },
     ]);
   });
 });
