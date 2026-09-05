@@ -40,8 +40,8 @@ test("spaces stay invisible by default and chat creation requires approval", asy
   });
 
   const supportSpace = sidebar
-    .locator('[data-sidebar-group^="space:"]')
-    .filter({ hasText: "Customer support" });
+    .getByText("Customer support", { exact: true })
+    .locator("xpath=ancestor::*[@data-sidebar-group][1]");
   const supportSpaceGroup = await supportSpace.getAttribute("data-sidebar-group");
   const supportSpaceId = supportSpaceGroup?.split(":")[1];
   expect(supportSpaceId).toBeTruthy();
@@ -58,8 +58,8 @@ test("spaces stay invisible by default and chat creation requires approval", asy
   await captureScreenshot(page, testInfo, "spaces-sidebar");
 
   const personalSpace = sidebar
-    .locator('[data-sidebar-group^="space:"]')
-    .filter({ hasText: "Personal" });
+    .getByText("Personal", { exact: true })
+    .locator("xpath=ancestor::*[@data-sidebar-group][1]");
   const personalSpaceGroup = await personalSpace.getAttribute("data-sidebar-group");
   const personalSpaceId = personalSpaceGroup?.split(":")[1];
   expect(personalSpaceId).toBeTruthy();
