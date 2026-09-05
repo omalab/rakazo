@@ -55,7 +55,8 @@ describe("inferScript human continuation", () => {
 
     expect(script).toEqual([
       {
-        assistant: "on it. i will work this in the background and come back with a result.\n\ndone. i handled: Paris",
+        assistant:
+          "on it. i will work this in the background and come back with a result.\n\ndone. i handled: Paris",
       },
       { files: [{ path: "notes/last-task.md", content: "# Task\n\nParis\n" }], complete: true },
     ]);
