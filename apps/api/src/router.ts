@@ -423,6 +423,91 @@ export function createRouter(deps: RouterDeps) {
         };
       }),
     },
+    people: {
+      list: authed.people.list.handler(async ({ context }) => {
+        if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");
+        const memberships = await deps.prisma.spaceMember.findMany({
+          where: { spaceId: context.actor.spaceId },
+          select: {
+            userId: true,
+            role: true,
+            member: { select: { user: { select: { name: true, email: true } } } },
+          },
+          orderBy: { createdAt: "asc" },
+        });
+        return memberships.map((membership) => ({
+          userId: membership.userId,
+          name: membership.member.user.name,
+          email: membership.member.user.email,
+          role: membership.role,
+        }));
+      }),
+      add: authed.people.add.handler(async ({ context, input }) => {
+        if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");
+        return deps.prisma.$transaction(async (tx) => {
+          const [space, user] = await Promise.all([
+            tx.space.findFirst({
+              where: { id: context.actor.spaceId },
+              select: { id: true, organizationId: true },
+            }),
+            tx.user.findFirst({
+              where: { email: { equals: input.email, mode: "insensitive" } },
+              select: { id: true, name: true, email: true },
+            }),
+          ]);
+          if (!space) throw new IsolationError();
+          if (!user) {
+            throw new ORPCError("NOT_FOUND", {
+              message: "No account exists for that email. Ask them to sign up first.",
+            });
+          }
+
+          await tx.member.upsert({
+            where: {
+              organizationId_userId: {
+                organizationId: space.organizationId,
+                userId: user.id,
+              },
+            },
+            create: {
+              id: randomUUID(),
+              organizationId: space.organizationId,
+              userId: user.id,
+              role: "member",
+              createdAt: new Date(),
+            },
+            update: {},
+          });
+          const membership = await tx.spaceMember.upsert({
+            where: { spaceId_userId: { spaceId: space.id, userId: user.id } },
+            create: {
+              id: randomUUID(),
+              spaceId: space.id,
+              organizationId: space.organizationId,
+              userId: user.id,
+              role: "member",
+              createdAt: new Date(),
+            },
+            update: {},
+            select: {
+              userId: true,
+              role: true,
+              member: { select: { user: { select: { name: true, email: true } } } },
+            },
+          });
+          await tx.session.updateMany({
+            where: { userId: user.id },
+            data: { activeOrganizationId: space.organizationId },
+          });
+          return {
+            userId: membership.userId,
+            name: membership.member.user.name,
+            email: membership.member.user.email,
+            role: membership.role,
+          };
+        });
+      }),
+    },
     externalConversations: {
       updatePolicy: authed.externalConversations.updatePolicy.handler(
         async ({ context, input }) => {

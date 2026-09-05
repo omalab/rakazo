@@ -78,6 +78,13 @@ import { SearchQueryOutputSchema } from "./search.js";
 const botId = z.object({ botId: Id });
 const groupId = z.object({ groupId: Id });
 
+const SpacePersonSchema = z.object({
+  userId: Id,
+  name: z.string(),
+  email: z.string().email(),
+  role: z.string(),
+});
+
 const threadTarget = z
   .object({
     botId: Id.optional(),
@@ -154,6 +161,12 @@ export const appContract = {
   spaces: {
     list: oc.output(SpaceNavigationSchema),
     create: oc.input(z.object({ name: z.string().trim().min(1).max(60) })).output(SpaceSchema),
+  },
+  people: {
+    list: oc.output(z.array(SpacePersonSchema)),
+    add: oc
+      .input(z.object({ email: z.string().trim().toLowerCase().email() }))
+      .output(SpacePersonSchema),
   },
   externalConversations: {
     updatePolicy: oc

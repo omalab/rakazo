@@ -12,11 +12,16 @@ export async function requireMembership(
   prisma: PrismaClient,
   userId: string,
   requestedSpaceId?: string | null,
+  activeOrganizationId?: string | null,
 ): Promise<Actor> {
   const membership = await prisma.spaceMember.findFirst({
     where: {
       userId,
-      ...(requestedSpaceId ? { spaceId: requestedSpaceId } : {}),
+      ...(requestedSpaceId
+        ? { spaceId: requestedSpaceId }
+        : activeOrganizationId
+          ? { organizationId: activeOrganizationId }
+          : {}),
     },
     orderBy: [{ space: { isDefault: "desc" } }, { createdAt: "asc" }, { id: "asc" }],
     include: { member: { include: { user: true } } },

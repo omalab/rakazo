@@ -390,7 +390,12 @@ export async function createApp(
     const session = await auth.api.getSession({ headers: sessionHeaders(c.req.raw) });
     const requestedSpaceId = c.req.header("x-rakazo-space-id");
     const actor = session?.user
-      ? await requireMembership(prisma, session.user.id, requestedSpaceId).catch(() => null)
+      ? await requireMembership(
+          prisma,
+          session.user.id,
+          requestedSpaceId,
+          session.session.activeOrganizationId,
+        ).catch(() => null)
       : null;
     const { matched, response } = await rpc.handle(c.req.raw, {
       prefix: "/rpc",
@@ -402,9 +407,12 @@ export async function createApp(
   mountVoiceHttpRoutes(app, { prisma, secrets }, async (c) => {
     const session = await auth.api.getSession({ headers: sessionHeaders(c.req.raw) });
     if (!session?.user) return null;
-    return requireMembership(prisma, session.user.id, c.req.header("x-rakazo-space-id")).catch(
-      () => null,
-    );
+    return requireMembership(
+      prisma,
+      session.user.id,
+      c.req.header("x-rakazo-space-id"),
+      session.session.activeOrganizationId,
+    ).catch(() => null);
   });
   mountWebhookHttpRoutes(app, { prisma, secrets, events, jobs });
   // Messaging webhooks only exist when the surface is enabled.
