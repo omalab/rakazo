@@ -68,6 +68,8 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["models/setDefault", { provider: "test", modelId: "test/model" }],
       ["spaces/list"],
       ["spaces/create", { name: "Nope" }],
+      ["people/list"],
+      ["people/add", { email: "member@example.test" }],
       ["bots/list"],
       ["bots/listArchived"],
       ["bots/get", { botId: "missing-bot" }],
@@ -505,11 +507,6 @@ describeWithDatabase("API authorization and resource isolation", () => {
     const ownerActor = await rpc<Actor>(app, owner, "me");
     const memberActor = await rpc<Actor>(app, member, "me");
     const ownerBot = await rpc<Bot>(app, owner, "bots/create", botInput("Shared Agent"));
-    const ownerBot2 = await rpc<Bot>(app, owner, "bots/create", botInput("Shared Agent Two"));
-    const ownerGroup = await rpc<{ id: string }>(app, owner, "groups/create", {
-      name: "Shared Group",
-      botIds: [ownerBot.id, ownerBot2.id],
-    });
     const ownerArtifact = await rpc<{ id: string }>(app, owner, "artifacts/create", {
       botId: ownerBot.id,
       name: "shared-note.txt",
@@ -530,8 +527,16 @@ describeWithDatabase("API authorization and resource isolation", () => {
 
     const sharedMe = await rpc<Actor>(app, member, "me");
     expect(sharedMe.spaceId).toBe(ownerActor.spaceId);
+    const memberBot = await rpc<Bot>(app, member, "bots/create", botInput("Member Agent"));
+    const ownerGroup = await rpc<{ id: string }>(app, owner, "groups/create", {
+      name: "Shared Group",
+      botIds: [ownerBot.id, memberBot.id],
+    });
     await expect(rpc<Array<{ id: string }>>(app, member, "bots/list")).resolves.toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: ownerBot.id })]),
+      expect.arrayContaining([
+        expect.objectContaining({ id: ownerBot.id }),
+        expect.objectContaining({ id: memberBot.id }),
+      ]),
     );
     await expect(rpc<Array<{ id: string }>>(app, member, "groups/list")).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: ownerGroup.id })]),
@@ -542,19 +547,41 @@ describeWithDatabase("API authorization and resource isolation", () => {
     await expect(
       rpc<{ threadId: string }>(app, member, "threads/get", { groupId: ownerGroup.id }),
     ).resolves.toEqual(expect.objectContaining({ threadId: expect.any(String) }));
-    await expect(
-      rpc(app, member, "threads/send", {
-        botId: ownerBot.id,
-        text: "Can you use this shared file?",
-        artifactIds: [ownerArtifact.id],
-      }),
-    ).resolves.toEqual(expect.objectContaining({ runId: expect.any(String) }));
-    await expect(
-      rpc(app, member, "threads/send", {
-        groupId: ownerGroup.id,
-        text: "Shared group update",
-      }),
-    ).resolves.toEqual(expect.objectContaining({ runIds: expect.any(Array) }));
+    const sharedBotSend = await rpc<{ runId: string }>(app, member, "threads/send", {
+      botId: ownerBot.id,
+      text: "Can you use this shared file?",
+      artifactIds: [ownerArtifact.id],
+    });
+    expect(sharedBotSend).toEqual(expect.objectContaining({ runId: expect.any(String) }));
+    const sharedGroupSend = await rpc<{ runIds: string[] }>(app, member, "threads/send", {
+      groupId: ownerGroup.id,
+      text: "Shared group update",
+      mentions: [ownerBot.id, memberBot.id],
+    });
+    expect(sharedGroupSend).toEqual(expect.objectContaining({ runIds: expect.any(Array) }));
+
+    const sharedRuns = await handles.prisma.run.findMany({
+      where: { id: { in: [sharedBotSend.runId, ...sharedGroupSend.runIds] } },
+      include: { task: { select: { userId: true } } },
+    });
+    expect(sharedRuns).toHaveLength(3);
+    expect(sharedRuns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          botId: ownerBot.id,
+          userId: ownerActor.userId,
+          task: { userId: memberActor.userId },
+        }),
+        expect.objectContaining({
+          botId: memberBot.id,
+          userId: memberActor.userId,
+          task: { userId: memberActor.userId },
+        }),
+      ]),
+    );
+    expect(sharedRuns.map((run) => run.userId).sort()).toEqual(
+      [ownerActor.userId, ownerActor.userId, memberActor.userId].sort(),
+    );
     await expect(
       rpc<{ contentBase64: string }>(app, member, "artifacts/get", {
         botId: ownerBot.id,
@@ -1098,6 +1125,57 @@ describeWithDatabase("API authorization and resource isolation", () => {
         signupAllowlist: [],
       });
     }
+  });
+
+  it("lets the deployment owner add an existing account to the current Space", async () => {
+    const ownerEmail = `people-owner-${stamp}@rakazo.test`;
+    const memberEmail = `people-member-${stamp}@rakazo.test`;
+    const owner = await signup(app, ownerEmail, "People Owner");
+    const member = await signup(app, memberEmail, "People Member");
+    const ownerActor = await rpc<Actor>(app, owner, "me");
+    const memberActor = await rpc<Actor>(app, member, "me");
+    await handles.prisma.deploymentSettings.update({
+      where: { id: "default" },
+      data: { ownerUserId: ownerActor.userId },
+    });
+
+    const added = await rpc<{
+      userId: string;
+      name: string;
+      email: string;
+      role: string;
+    }>(app, owner, "people/add", { email: memberEmail.toUpperCase() });
+
+    expect(added).toEqual({
+      userId: memberActor.userId,
+      name: "People Member",
+      email: memberEmail,
+      role: "member",
+    });
+    expect(
+      await handles.prisma.spaceMember.findUnique({
+        where: {
+          spaceId_userId: { spaceId: ownerActor.spaceId, userId: memberActor.userId },
+        },
+      }),
+    ).toMatchObject({
+      spaceId: ownerActor.spaceId,
+      userId: memberActor.userId,
+      role: "member",
+    });
+    expect(
+      await handles.prisma.session.findFirst({
+        where: { userId: memberActor.userId },
+        orderBy: { createdAt: "desc" },
+      }),
+    ).toMatchObject({ activeOrganizationId: expect.any(String) });
+    expect(await rpc<Array<{ userId: string }>>(app, owner, "people/list")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ userId: ownerActor.userId }),
+        expect.objectContaining({ userId: memberActor.userId }),
+      ]),
+    );
+    await expectForbidden(app, member, "people/add", { email: ownerEmail });
   });
 });
 

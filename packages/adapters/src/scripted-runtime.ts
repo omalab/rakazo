@@ -149,6 +149,12 @@ export function inferScript(
       },
     ];
   }
+  const humanAnswerMarker = "\n\nhuman answer:";
+  const humanAnswerIndex = lower.lastIndexOf(humanAnswerMarker);
+  if (humanAnswerIndex >= 0) {
+    const answer = prompt.slice(humanAnswerIndex + humanAnswerMarker.length).trim();
+    if (answer) return inferScript(answer, resumeFromCheckpoint);
+  }
   // Before every content-based intent so payload text cannot steal the branch.
   if (lower.includes("message the bot named") || lower.includes("message bot named")) {
     const name = namedBot(prompt) ?? "Peer";

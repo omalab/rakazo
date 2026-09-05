@@ -581,4 +581,56 @@ describe("automatic outcome return", () => {
       data: { botOutcomeReturnedAt: expect.any(Date) },
     });
   });
+
+  it("returns a delegated result to the coordinator's originating thread", async () => {
+    const harness = deps({
+      hopBlocks: [
+        {
+          kind: "bot_message_received",
+          fromBotId: "bot-target",
+          fromBotName: "Arthur",
+          text: "research this",
+          hop: 1,
+          intent: "request",
+          returnToMessageId: "message-request",
+        },
+      ],
+    });
+    (harness.deps.prisma.message.findUnique as ReturnType<typeof vi.fn>).mockImplementation(
+      async (args: { where?: { threadId_clientNonce?: unknown } }) =>
+        args.where?.threadId_clientNonce
+          ? null
+          : {
+              blocks: [
+                {
+                  kind: "bot_message_received",
+                  fromBotId: "bot-target",
+                  fromBotName: "Arthur",
+                  text: "research this",
+                  hop: 1,
+                  intent: "request",
+                  returnToMessageId: "message-request",
+                },
+              ],
+              replyTo: {
+                threadId: "thread-original",
+                blocks: [{ kind: "bot_message_sent", intent: "request" }],
+              },
+            },
+    );
+
+    await returnBotMessageOutcome(
+      harness.deps,
+      { ...run, sourceMessageId: "message-source" },
+      sender,
+      "The answer is 42.",
+    );
+
+    expect(harness.tx.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ threadId: "thread-original" }) }),
+    );
+    expect(harness.tx.run.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ threadId: "thread-original" }) }),
+    );
+  });
 });

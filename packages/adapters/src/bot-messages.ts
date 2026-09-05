@@ -42,21 +42,33 @@ export async function loadBotMessageContext(
   if (!sourceMessageId) return undefined;
   const source = await prisma.message.findUnique({
     where: { id: sourceMessageId },
-    select: { blocks: true, replyTo: { select: { blocks: true } } },
+    select: { blocks: true, replyTo: { select: { id: true, blocks: true, threadId: true } } },
   });
   const context = botMessageContext(
     Array.isArray(source?.blocks) ? (source.blocks as MessageBlock[]) : [],
   );
   if (!context) return undefined;
-  const replyBlocks = Array.isArray(source?.replyTo?.blocks)
-    ? (source.replyTo.blocks as MessageBlock[])
+  const returnTarget =
+    source?.replyTo ??
+    (context.returnToMessageId
+      ? await prisma.message.findUnique({
+          where: { id: context.returnToMessageId },
+          select: { id: true, blocks: true, threadId: true },
+        })
+      : null);
+  const replyBlocks = Array.isArray(returnTarget?.blocks)
+    ? (returnTarget.blocks as MessageBlock[])
     : [];
   const repliesToRequest = replyBlocks.some(
     (block) =>
       block.kind === "bot_message_sent" &&
       (block.intent === undefined || block.intent === "request" || block.intent === "question"),
   );
-  return { ...context, repliesToRequest };
+  return {
+    ...context,
+    repliesToRequest,
+    returnToThreadId: returnTarget?.threadId,
+  };
 }
 
 export async function messageBot(
@@ -118,7 +130,11 @@ export async function messageBot(
     };
   }
 
-  const targetThreadId = target.thread.id;
+  const repliesToRequester = sourceContext?.fromBotId === target.id && intent !== "fyi";
+  const targetThreadId =
+    repliesToRequester && sourceContext.returnToThreadId
+      ? sourceContext.returnToThreadId
+      : target.thread.id;
 
   // A tool call can be re-executed after a lease expiry, so a delivery has to be
   // replayable: without this the recipient is messaged twice and woken twice.

@@ -523,7 +523,10 @@ describe("answerRunInput", () => {
         update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
       run: {
-        findFirst: vi.fn().mockResolvedValue({ botId: "bot-2" }),
+        findFirst: vi.fn().mockResolvedValue({
+          botId: "bot-2",
+          task: { prompt: "Prepare the launch recommendation" },
+        }),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUnique: vi.fn().mockResolvedValue({
           status: "queued",
@@ -563,7 +566,12 @@ describe("answerRunInput", () => {
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ status: "waiting_input" }),
-        data: { status: "queued", checkpoint: null },
+        data: {
+          status: "queued",
+          checkpoint: null,
+          teamChatInputClaimedAt: null,
+          teamChatInputMirroredAt: null,
+        },
       }),
     );
     expect(tx.message.update).toHaveBeenCalledWith({
@@ -585,7 +593,10 @@ describe("answerRunInput", () => {
     });
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: "Selected choice choice-2: Paris" },
+      data: {
+        prompt:
+          "Prepare the launch recommendation\n\nHuman answer: Selected choice choice-2: Paris",
+      },
     });
     expect(tx.event.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -621,6 +632,7 @@ describe("answerRunInput", () => {
         findFirst: vi.fn().mockResolvedValue({
           botId: "bot-2",
           userId: "user-1",
+          task: { prompt: "Choose the deployment token" },
           checkpoint: JSON.stringify({
             kind: "choice_ask_v1",
             actions: [
@@ -667,7 +679,9 @@ describe("answerRunInput", () => {
 
     expect(tx.task.updateMany).toHaveBeenCalledWith({
       where: { runs: { some: { id: "run-1" } } },
-      data: { prompt: `Selected choice choice-1: use ${secret}` },
+      data: {
+        prompt: `Choose the deployment token\n\nHuman answer: Selected choice choice-1: use ${secret}`,
+      },
     });
     expect(tx.message.update).toHaveBeenCalledWith({
       where: { id: "message-1" },
@@ -688,7 +702,12 @@ describe("answerRunInput", () => {
     });
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: { status: "queued", checkpoint: null },
+        data: {
+          status: "queued",
+          checkpoint: null,
+          teamChatInputClaimedAt: null,
+          teamChatInputMirroredAt: null,
+        },
       }),
     );
   });

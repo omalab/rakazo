@@ -83,7 +83,13 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
 
       const delegation = this.tools.find((tool) => tool.name === "run_subagent");
       if (delegation) {
-        const args = { name: "loop", task: "keep calling shell" };
+        const rawArgs = {
+          name: "loop",
+          task: "keep calling shell",
+          max_tool_calls: 3,
+          max_duration_seconds: 30,
+        };
+        const args = delegation.prepareArguments?.(rawArgs) ?? rawArgs;
         this.emit({ type: "tool_execution_start", toolName: delegation.name, args });
         await delegation.execute("delegate-1", args);
         return;
@@ -94,8 +100,8 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
       for (let index = 0; index < 100; index += 1) {
         const args = { command: `echo ${index}` };
         this.emit({ type: "tool_execution_start", toolName: shell.name, args });
-        if (this.aborted) break;
         await shell.execute(`shell-${index}`, args);
+        if (this.aborted) break;
       }
     }
 
@@ -664,7 +670,7 @@ describe("Pi connector tool dispatch", () => {
     });
   });
 
-  it("shares an optional tool-call fuse with subagents and still emits a final message", async () => {
+  it("stops exhausted worker work as incomplete before the parent request fuse", async () => {
     process.env.MAX_TOOL_CALLS_PER_TURN = "80";
     fakeAgentState.mode = "subagent-limit";
     const executeTool = vi.fn(async () => ({ ok: true }));
@@ -701,20 +707,14 @@ describe("Pi connector tool dispatch", () => {
       events.push(event);
     }
 
-    expect(executeTool).toHaveBeenCalledTimes(79);
-    expect(fakeAgentState.abortCount).toBeGreaterThanOrEqual(2);
-    expect(events).toContainEqual({
-      type: "progress",
-      text: "Stopped: more than 80 tool calls in one turn.",
-    });
-    expect(events).toContainEqual({
-      type: "text",
-      text: "I stopped after reaching the limit of 80 tool calls in this turn. Send another message to continue.",
-    });
-    expect(events).toContainEqual({
-      type: "done",
-      text: "I stopped after reaching the limit of 80 tool calls in this turn. Send another message to continue.",
-    });
+    expect(executeTool).toHaveBeenCalledTimes(3);
+    expect(fakeAgentState.abortCount).toBeGreaterThanOrEqual(1);
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: "progress",
+        text: expect.stringContaining("more than 80 tool calls"),
+      }),
+    );
     const subagentEvents = events.filter(
       (event): event is { type: "subagent"; status: string; result?: string } =>
         typeof event === "object" &&
@@ -722,13 +722,11 @@ describe("Pi connector tool dispatch", () => {
         "type" in event &&
         (event as { type?: string }).type === "subagent",
     );
-    expect(subagentEvents.some((event) => event.status === "failed")).toBe(false);
     expect(subagentEvents).toContainEqual(
       expect.objectContaining({
         type: "subagent",
-        status: "completed",
-        result:
-          "I stopped after reaching the limit of 80 tool calls in this turn. Send another message to continue.",
+        status: "failed",
+        result: "Worker incomplete: reached the 3 tool-call budget.",
       }),
     );
   });

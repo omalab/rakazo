@@ -10,7 +10,7 @@ import {
   useState,
 } from "react";
 import { ApprovalRulesSettings } from "../components/ApprovalRulesSettings";
-import { BuiButton, SuccessPop } from "../components/beautiful-ui/primitives";
+import { BuiButton, LoadingState, SuccessPop } from "../components/beautiful-ui/primitives";
 import {
   ComputersUnavailableHint,
   computersAreUnavailable,
@@ -18,6 +18,7 @@ import {
 import { SoftwareUpdateSection } from "../components/SoftwareUpdateSection";
 import { authClient } from "../lib/auth";
 import { getActiveUiLocale, setUiLocale } from "../lib/i18n";
+import { rpc } from "../lib/rpc";
 import {
   type AppearancePreference,
   getUiAppearancePreference,
@@ -146,6 +147,8 @@ export function AccountSettingsOverlay({
           </section>
 
           <ChangePasswordSection />
+
+          {isDeploymentOwner ? <PeopleSettingsSection /> : null}
 
           {messagingEnabled && onOpenMessaging ? (
             <section className="mt-5 rounded-[14px] border border-[var(--rk-border)] bg-[var(--rk-inset)] px-4 py-4">
@@ -282,6 +285,117 @@ export function AccountSettingsOverlay({
         </div>
       </div>
     </div>
+  );
+}
+
+type SpacePerson = {
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+};
+
+function PeopleSettingsSection() {
+  const { t } = useLingui();
+  const [people, setPeople] = useState<SpacePerson[]>([]);
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void rpc.people
+      .list()
+      .then((next) => {
+        if (!cancelled) setPeople(next);
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          setError(reason instanceof Error ? reason.message : t`Could not load people`);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  async function addPerson() {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (pending || !normalizedEmail) return;
+    setPending(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const added = await rpc.people.add({ email: normalizedEmail });
+      setPeople((current) => {
+        const withoutAdded = current.filter((person) => person.userId !== added.userId);
+        return [...withoutAdded, added];
+      });
+      setEmail("");
+      setSaved(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t`Could not add this person`);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <section
+      data-testid="people-settings"
+      className="mt-5 rounded-[14px] border border-[var(--rk-border)] bg-[var(--rk-inset)] px-4 py-4"
+    >
+      <h3 className="text-[15px] font-medium text-[var(--rk-ink)]">
+        <Trans>People</Trans>
+      </h3>
+      {loading ? (
+        <LoadingState label={t`Loading people`} />
+      ) : (
+        <div className="mt-3 divide-y divide-[var(--rk-hairline-strong)]">
+          {people.map((person) => (
+            <div key={person.userId} className="flex items-center justify-between gap-4 py-2.5">
+              <div className="min-w-0">
+                <p className="truncate text-[14px] text-[var(--rk-ink)]">{person.name}</p>
+                <p className="truncate text-[12.5px] text-[var(--rk-muted-2)]">{person.email}</p>
+              </div>
+              <span className="shrink-0 text-[12px] capitalize text-[var(--rk-muted)]">
+                {person.role}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+        <label className="min-w-0 flex-1 text-[12.5px] text-[var(--rk-muted)]">
+          <Trans>Existing account email</Trans>
+          <input
+            aria-label={t`Existing account email`}
+            type="email"
+            autoComplete="off"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void addPerson();
+            }}
+            className="mt-1.5 w-full rounded-[11px] border border-[var(--rk-scroll)] bg-[var(--rk-hairline)] px-3.5 py-2.5 text-[14px] text-[var(--rk-ink)] outline-none focus:border-[var(--rk-muted-2)]"
+          />
+        </label>
+        <BuiButton tone="accent" disabled={pending || !email.trim()} onClick={addPerson}>
+          {pending ? <Trans>Adding…</Trans> : <Trans>Add person</Trans>}
+        </BuiButton>
+      </div>
+      {error ? (
+        <p role="alert" className="mt-3 text-[12.5px] text-[var(--rk-danger)]">
+          {error}
+        </p>
+      ) : null}
+      {saved ? <SuccessPop label={t`Access added`} /> : null}
+    </section>
   );
 }
 

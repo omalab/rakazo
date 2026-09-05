@@ -96,6 +96,166 @@ describe("account preferences", () => {
   });
 });
 
+describe("space people", () => {
+  const owner = {
+    spaceId: "space-1",
+    userId: "owner-1",
+    email: "owner@rakazo.test",
+    isDeploymentOwner: true,
+  } satisfies Actor;
+
+  function peopleDeps() {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        userId: "owner-1",
+        role: "owner",
+        member: { user: { name: "Owner", email: "owner@rakazo.test" } },
+      },
+    ]);
+    const findSpace = vi.fn().mockResolvedValue({
+      id: "space-1",
+      organizationId: "org-1",
+    });
+    const findUser = vi.fn().mockResolvedValue({
+      id: "member-1",
+      name: "Liz",
+      email: "liz@rakazo.test",
+    });
+    const upsertMember = vi.fn().mockResolvedValue({ role: "member" });
+    const updateSessions = vi.fn().mockResolvedValue({ count: 1 });
+    const upsertSpaceMember = vi.fn().mockResolvedValue({
+      userId: "member-1",
+      role: "member",
+      member: { user: { name: "Liz", email: "liz@rakazo.test" } },
+    });
+    const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        space: { findFirst: findSpace },
+        user: { findFirst: findUser },
+        member: { upsert: upsertMember },
+        spaceMember: { upsert: upsertSpaceMember },
+        session: { updateMany: updateSessions },
+      }),
+    );
+    const prisma = {
+      spaceMember: { findMany },
+      $transaction: transaction,
+    } as unknown as PrismaClient;
+    const deps = {
+      prisma,
+      env: {
+        defaultProvider: "fake",
+        defaultModel: "fake-model",
+        webOrigin: "http://127.0.0.1:5173",
+        screenProxySecret: "fake-test-secret",
+        sandboxProvider: "fake",
+      },
+      dataDir: "/tmp/rakazo-router-test",
+    } as unknown as RouterDeps;
+    return {
+      findMany,
+      findSpace,
+      findUser,
+      upsertMember,
+      upsertSpaceMember,
+      updateSessions,
+      handler: new RPCHandler(createRouter(deps)),
+    };
+  }
+
+  it("lists people in the current Space for the deployment owner", async () => {
+    const { handler, findMany } = peopleDeps();
+
+    const { response } = await handler.handle(
+      new Request("http://127.0.0.1/rpc/people/list", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: null }),
+      }),
+      { prefix: "/rpc", context: { actor: owner } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { spaceId: "space-1" } }),
+    );
+    await expect(response.json()).resolves.toEqual({
+      json: [{ userId: "owner-1", name: "Owner", email: "owner@rakazo.test", role: "owner" }],
+    });
+  });
+
+  it("adds an existing account to the current organization and Space", async () => {
+    const { handler, findSpace, findUser, upsertMember, upsertSpaceMember, updateSessions } =
+      peopleDeps();
+
+    const { response } = await handler.handle(
+      new Request("http://127.0.0.1/rpc/people/add", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ json: { email: "  LIZ@RAKAZO.TEST " } }),
+      }),
+      { prefix: "/rpc", context: { actor: owner } },
+    );
+
+    expect(response.status).toBe(200);
+    expect(findSpace).toHaveBeenCalledWith({
+      where: { id: "space-1" },
+      select: { id: true, organizationId: true },
+    });
+    expect(findUser).toHaveBeenCalledWith({
+      where: { email: { equals: "liz@rakazo.test", mode: "insensitive" } },
+      select: { id: true, name: true, email: true },
+    });
+    expect(upsertMember).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId_userId: { organizationId: "org-1", userId: "member-1" } },
+        update: {},
+      }),
+    );
+    expect(upsertSpaceMember).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { spaceId_userId: { spaceId: "space-1", userId: "member-1" } },
+        update: {},
+      }),
+    );
+    expect(updateSessions).toHaveBeenCalledWith({
+      where: { userId: "member-1" },
+      data: { activeOrganizationId: "org-1" },
+    });
+    await expect(response.json()).resolves.toEqual({
+      json: {
+        userId: "member-1",
+        name: "Liz",
+        email: "liz@rakazo.test",
+        role: "member",
+      },
+    });
+  });
+
+  it("forbids non-owners from listing or adding people", async () => {
+    const { handler, findMany, findUser } = peopleDeps();
+    const member = { ...owner, userId: "member-2", isDeploymentOwner: false };
+
+    for (const [procedure, input] of [
+      ["list", null],
+      ["add", { email: "new@rakazo.test" }],
+    ] as const) {
+      const { response } = await handler.handle(
+        new Request(`http://127.0.0.1/rpc/people/${procedure}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ json: input }),
+        }),
+        { prefix: "/rpc", context: { actor: member } },
+      );
+      expect(response.status).toBe(403);
+    }
+
+    expect(findMany).not.toHaveBeenCalled();
+    expect(findUser).not.toHaveBeenCalled();
+  });
+});
+
 describe("external conversation policy", () => {
   it("persists room policy through the scoped repository", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });

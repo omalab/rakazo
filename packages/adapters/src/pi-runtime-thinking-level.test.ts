@@ -10,6 +10,8 @@ const fakeAgentState = vi.hoisted(() => ({
     maxTokens?: number;
   }>,
   sessionIds: [] as Array<string | undefined>,
+  systemPrompts: [] as string[],
+  promptInputs: [] as string[],
   failPrompt: false,
 }));
 
@@ -26,6 +28,7 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
     constructor(options: {
       sessionId?: string;
       initialState: {
+        systemPrompt: string;
         thinkingLevel: string;
         tools: FakeAgentTool[];
         model: (typeof fakeAgentState.models)[number];
@@ -33,15 +36,22 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
     }) {
       this.tools = options.initialState.tools;
       fakeAgentState.sessionIds.push(options.sessionId);
+      fakeAgentState.systemPrompts.push(options.initialState.systemPrompt);
       fakeAgentState.thinkingLevels.push(options.initialState.thinkingLevel);
       fakeAgentState.models.push(options.initialState.model);
     }
 
     subscribe(_listener: unknown) {}
-    async prompt() {
+    async prompt(prompt: string) {
+      fakeAgentState.promptInputs.push(prompt);
       if (fakeAgentState.failPrompt) throw new Error("prompt failed");
       const runSubagent = this.tools.find((tool) => tool.name === "run_subagent");
-      await runSubagent?.execute("subagent-call", { name: "helper", task: "help" });
+      await runSubagent?.execute("subagent-call", {
+        name: "helper",
+        task: "help",
+        max_tool_calls: 6,
+        max_duration_seconds: 30,
+      });
     }
     async waitForIdle() {}
     abort() {}
@@ -53,6 +63,9 @@ vi.mock("@earendil-works/pi-ai/providers/all", () => ({
     getModel: (_provider: string, modelId: string) => {
       if (modelId === "reasoning-model") return { provider: "test", id: modelId, reasoning: true };
       if (modelId === "plain-model") return { provider: "test", id: modelId, reasoning: false };
+      if (modelId === "worker-model") {
+        return { provider: "worker-provider", id: modelId, reasoning: false };
+      }
       if (modelId === "grok-4.6") {
         return {
           provider: "xai",
@@ -94,6 +107,11 @@ async function runWithModel(
   provider = "test",
   signal = new AbortController().signal,
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null,
+  workerModel?: {
+    provider: string;
+    id: string;
+    thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+  },
 ) {
   const runtime = new PiAgentRuntime();
   for await (const _event of runtime.run(
@@ -106,6 +124,7 @@ async function runWithModel(
       history: [],
       tools: [],
       model: { provider, id: modelId, thinkingLevel },
+      workerModel,
       executeTool: vi.fn(async () => ({ ok: true })),
     },
     {
@@ -126,6 +145,8 @@ describe("Pi agent thinking level", () => {
     fakeAgentState.thinkingLevels = [];
     fakeAgentState.models = [];
     fakeAgentState.sessionIds = [];
+    fakeAgentState.systemPrompts = [];
+    fakeAgentState.promptInputs = [];
     fakeAgentState.failPrompt = false;
     vi.unstubAllEnvs();
   });
@@ -147,6 +168,20 @@ describe("Pi agent thinking level", () => {
   it("honors a per-bot thinking level on reasoning models", async () => {
     const levels = await runWithModel("grok-4.6", "xai", new AbortController().signal, "high");
     expect(levels).toEqual(["high", "high"]);
+  });
+
+  it("uses an independently resolved worker model instead of inheriting the manager", async () => {
+    await runWithModel("reasoning-model", "test", new AbortController().signal, "high", {
+      provider: "worker-provider",
+      id: "worker-model",
+      thinkingLevel: "off",
+    });
+
+    expect(fakeAgentState.models).toEqual([
+      expect.objectContaining({ provider: "test", id: "reasoning-model" }),
+      expect.objectContaining({ provider: "worker-provider", id: "worker-model" }),
+    ]);
+    expect(fakeAgentState.thinkingLevels).toEqual(["high", "off"]);
   });
 
   it("keeps reasoning off for the main agent and subagent", async () => {

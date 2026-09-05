@@ -249,6 +249,7 @@ import { advanceToolCallLoopGuard } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
 import { createWebProvider } from "./web-provider-factory.js";
 import { webFetchFromTool, webSearchFromTool } from "./web-tools.js";
+import { configuredWorkerModel } from "./worker-model.js";
 
 const modelCredentialLocks = new Map<string, Promise<void>>();
 const READ_ONLY_AGENT_TOOLS = new Set([
@@ -1072,6 +1073,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
           (values) => runSecrets.push(...values),
         );
         runSecrets.push(...resolved.redact);
+        const workerSelection = configuredWorkerModel();
+        const workerCredential = workerSelection
+          ? await findModelCredential(deps.prisma, run, workerSelection.provider)
+          : null;
+        const resolvedWorker = workerSelection
+          ? await resolveModelKey(
+              deps,
+              run.userId,
+              run.spaceId,
+              workerCredential,
+              workerSelection.provider,
+              (values) => runSecrets.push(...values),
+            )
+          : undefined;
+        if (resolvedWorker) runSecrets.push(...resolvedWorker.redact);
+        const workerModel: AgentRunRequest["workerModel"] =
+          workerSelection && resolvedWorker
+            ? {
+                ...workerSelection,
+                apiKey: resolvedWorker.oauth ? undefined : resolvedWorker.apiKey,
+                baseUrl: resolvedWorker.baseUrl,
+                oauth: resolvedWorker.oauth
+                  ? {
+                      credential: resolvedWorker.oauth,
+                      persist: resolvedWorker.persistOAuth,
+                    }
+                  : undefined,
+              }
+            : undefined;
         await deps.prisma.run.updateMany({
           where: { id: runId, status: "running", leaseOwner: workerId, leaseFence: fence },
           data: { modelProvider: runModelProvider, modelId: runModelId },
@@ -2800,7 +2830,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 "A bot and a subagent are different. Never use both for the same request.",
                 "create_space proposes a new privacy boundary inside the current organization. Use it when the user asks to create a space or separate data between teams or projects. It always pauses for explicit user approval; never claim the space exists before the tool succeeds.",
                 "spawn_bot creates a lasting regular bot (own chat, computer, memory) that appears in the user's bot list. If the user asked to create a bot, call spawn_bot once and stop. Do not run_subagent to demo it.",
-                "run_subagent is a short helper inside this turn only. It is not a bot, has no thread, and does not show in the list. Use it for parallel work you will summarize here.",
+                "run_subagent is a short helper inside this turn only. It is not a bot, has no thread, and does not show in the list. Give it only the task-specific context it needs, set explicit tool-call and duration budgets, and treat an incomplete worker result as unfinished work.",
                 botDirectory,
                 thread.externalConversationId ? teamChatGatewayInstruction(bot.name) : undefined,
                 "archive_bot safely archives a bot this bot created, and only that bot. Use it when the user asks to remove that bot or when it is finished and unused. The user can restore it or permanently delete it later. confirm_name must exactly match its name.",
@@ -2830,6 +2860,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? { credential: resolved.oauth, persist: resolved.persistOAuth }
                   : undefined,
               },
+              workerModel,
               resumeFromCheckpoint: takeoverResume?.checkpoint,
               script,
               allowSilentEmpty: allowSilentPeerMessage || messagingChannelRun,

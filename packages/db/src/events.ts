@@ -174,6 +174,7 @@ export interface AnswerRunInput {
   messageId: string;
   answeredByUserId: string;
   answer: string;
+  sourceExternalMessageId?: string;
 }
 
 export interface SendUserMessageInput {
@@ -540,7 +541,12 @@ export async function answerRunInput(
         threadId: input.threadId,
         status: "waiting_input",
       },
-      select: { botId: true, userId: true, checkpoint: true },
+      select: {
+        botId: true,
+        userId: true,
+        checkpoint: true,
+        task: { select: { prompt: true } },
+      },
     });
     if (!run) return null;
     const message = await tx.message.findFirst({
@@ -594,6 +600,8 @@ export async function answerRunInput(
       },
       data: {
         status: "queued",
+        teamChatInputClaimedAt: null,
+        teamChatInputMirroredAt: null,
         ...(choiceAsk ? { checkpoint: null } : {}),
       },
     });
@@ -650,9 +658,9 @@ export async function answerRunInput(
       const task = await tx.task.updateMany({
         where: { runs: { some: { id: input.runId } } },
         data: {
-          prompt: selectedChoice
-            ? `Selected choice ${selectedChoice.id}: ${resumeLabel}`
-            : input.answer,
+          prompt: `${run.task.prompt}\n\nHuman answer: ${
+            selectedChoice ? `Selected choice ${selectedChoice.id}: ${resumeLabel}` : input.answer
+          }`,
         },
       });
       if (task.count !== 1) throw new Error("Run task was not available to answer");
@@ -668,6 +676,22 @@ export async function answerRunInput(
         : block,
     );
     await tx.message.update({ where: { id: message.id }, data: { blocks } });
+    if (input.sourceExternalMessageId) {
+      const bound = await tx.externalMessage.updateMany({
+        where: {
+          id: input.sourceExternalMessageId,
+          status: "received",
+          externalConversation: { spaceId: input.spaceId },
+        },
+        data: {
+          status: "answered",
+          answerRunId: input.runId,
+          answerMessageId: message.id,
+          deliveredAt: new Date(),
+        },
+      });
+      if (bound.count !== 1) throw new Error("External answer was not available to bind");
+    }
     const updated = await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
       threadId: input.threadId,

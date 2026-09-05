@@ -252,7 +252,7 @@ async function lockAndLoadGroupMembers(
     include: {
       members: {
         where: { bot: { archivedAt: null } },
-        include: { bot: { select: { id: true, name: true, color: true } } },
+        include: { bot: { select: { id: true, name: true, color: true, userId: true } } },
         orderBy: { createdAt: "asc" },
       },
     },
@@ -262,6 +262,7 @@ async function lockAndLoadGroupMembers(
     botId: member.bot.id,
     name: member.bot.name,
     color: member.bot.color,
+    executionUserId: member.bot.userId,
   }));
 }
 
@@ -690,7 +691,10 @@ export async function sendThreadMessage(
             botId: target.botId,
             threadId: target.threadId,
             taskId: task.id,
-            userId: actor.userId,
+            // Keep Task.userId as the requester for attribution. Runs execute as
+            // the agent owner so every Space member gets the agent's configured
+            // model, memory, skills, connectors, and approval policy.
+            userId: target.bot.userId,
             status: "queued",
             trigger: "user",
             clientNonce: sendRunClientNonce(input.clientNonce, message.id),
@@ -725,6 +729,9 @@ export async function sendThreadMessage(
 
       const members = await lockAndLoadGroupMembers(tx, actor, target);
       const memberBotIds = members.map((member) => member.botId);
+      const executionUserIdByBotId = new Map(
+        members.map((member) => [member.botId, member.executionUserId]),
+      );
       const mentionTargets = splitMentionTargets(input.mentions);
       const targetBotIds = resolveGroupTargetBotIds({
         text: input.text ?? "",
@@ -783,13 +790,17 @@ export async function sendThreadMessage(
             status: "queued",
           },
         });
+        const executionUserId = executionUserIdByBotId.get(botId);
+        if (!executionUserId) throw new IsolationError("Group target bot has no execution owner");
         const run = await tx.run.create({
           data: {
             spaceId: actor.spaceId,
             botId,
             threadId: target.threadId,
             taskId: task.id,
-            userId: actor.userId,
+            // One group message can target agents configured by different
+            // members. Each run must use its own agent's execution identity.
+            userId: executionUserId,
             status: "queued",
             trigger: "user",
             clientNonce: sendRunClientNonce(input.clientNonce, message.id, botId),
@@ -888,7 +899,7 @@ export async function reactToThreadMessage(
             botId,
             threadId: target.threadId,
             taskId: task.id,
-            userId: actor.userId,
+            userId: target.bot.userId,
             status: "queued",
             trigger: "reaction",
             sourceMessageId: message.id,

@@ -70,7 +70,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "elie222",
+        "owner": "omalab",
         "repo": "rakazo"
       }
     ]

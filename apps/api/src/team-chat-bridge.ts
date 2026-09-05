@@ -1,7 +1,7 @@
 import type { JobPublisher, TeamChatInboundMessage, TeamChatProvider } from "@rakazo/adapter-kit";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import { AutomatedSenderPoliciesSchema, type MessageBlock } from "@rakazo/contracts";
-import { BOT_MESSAGE_MAX_HOPS } from "@rakazo/core";
+import { BOT_MESSAGE_MAX_HOPS, botMessageContext } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import type { TeamChatEngagementJudge } from "./team-chat-judge.js";
 
@@ -11,10 +11,11 @@ const BATCH_SIZE = 20;
 const AMBIENT_BATCH_SIZE = 100;
 const AMBIENT_CONTEXT_MESSAGES = 20;
 const AMBIENT_CONTEXT_MESSAGE_CHARS = 2_000;
+const INPUT_DELIVERY_RESERVATION_MS = 2 * 60_000;
 
 interface TeamChatBridgeDeps {
   prisma: PrismaClient;
-  events: Pick<ThreadEvents, "sendUserMessage">;
+  events: Pick<ThreadEvents, "sendUserMessage"> & Partial<Pick<ThreadEvents, "answerRunInput">>;
   jobs: Pick<JobPublisher, "enqueue">;
   provider: TeamChatProvider;
   botId: string;
@@ -48,6 +49,32 @@ export function teamChatResponseText(
     .join("")
     .trim();
   return text || (allowSilence ? "" : `${botName} completed the request without a written reply.`);
+}
+
+export function teamChatQuestionText(ask: Extract<MessageBlock, { kind: "ask" }>): string {
+  if (ask.input === "secret") {
+    return `${ask.text}\n\nOpen Rakazo to answer this securely.`;
+  }
+  const options = ask.actions?.map((action) => action.label).filter(Boolean) ?? [];
+  return options.length > 0
+    ? `${ask.text}\n\nReply with one of:\n${options.map((option) => `- ${option}`).join("\n")}`
+    : ask.text;
+}
+
+export function teamChatAnswer(
+  ask: Extract<MessageBlock, { kind: "ask" }>,
+  content: string,
+): string | undefined {
+  const answer = content.trim();
+  if (!answer) return undefined;
+  if (!ask.actions?.length) return answer;
+  const normalized = answer.toLocaleLowerCase();
+  const match = ask.actions.find(
+    (action) =>
+      action.id.toLocaleLowerCase() === normalized ||
+      action.label.toLocaleLowerCase() === normalized,
+  );
+  return match?.id;
 }
 
 export function teamChatAmbientPrompt(input: {
@@ -289,7 +316,57 @@ export class TeamChatBridge {
         await this.deliverFailure(message).catch((error) => this.retry(message, error));
       }
     }
+    await this.deliverPendingInputs(target);
     await this.deliverDelegatedReplies(target);
+  }
+
+  private async deliverPendingInputs(target: TargetBot): Promise<void> {
+    const staleClaim = new Date(Date.now() - INPUT_DELIVERY_RESERVATION_MS);
+    const runs = await this.deps.prisma.run.findMany({
+      where: {
+        spaceId: target.spaceId,
+        status: "waiting_input",
+        teamChatInputMirroredAt: null,
+        OR: [{ teamChatInputClaimedAt: null }, { teamChatInputClaimedAt: { lte: staleClaim } }],
+      },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+      take: BATCH_SIZE,
+      select: { id: true },
+    });
+    for (const run of runs) {
+      const origin = await this.findExternalOriginForRun(run.id);
+      if (!origin) continue;
+      const pending = await this.pendingAsk(run.id);
+      if (!pending) continue;
+      const claimedAt = new Date();
+      const claimed = await this.deps.prisma.run.updateMany({
+        where: {
+          id: run.id,
+          status: "waiting_input",
+          teamChatInputMirroredAt: null,
+          OR: [{ teamChatInputClaimedAt: null }, { teamChatInputClaimedAt: { lte: staleClaim } }],
+        },
+        data: { teamChatInputClaimedAt: claimedAt },
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        await this.deps.provider.send({
+          conversationId: origin.externalConversation.conversationId,
+          replyThreadId: origin.replyThreadId,
+          content: teamChatQuestionText(pending.ask),
+        });
+        await this.deps.prisma.run.updateMany({
+          where: { id: run.id, status: "waiting_input", teamChatInputClaimedAt: claimedAt },
+          data: { teamChatInputClaimedAt: null, teamChatInputMirroredAt: new Date() },
+        });
+      } catch (error) {
+        await this.deps.prisma.run.updateMany({
+          where: { id: run.id, status: "waiting_input", teamChatInputClaimedAt: claimedAt },
+          data: { teamChatInputClaimedAt: null },
+        });
+        throw error;
+      }
+    }
   }
 
   private async deliverDelegatedReplies(target: TargetBot): Promise<void> {
@@ -350,16 +427,26 @@ export class TeamChatBridge {
     for (let depth = 0; currentSourceMessageId && depth <= BOT_MESSAGE_MAX_HOPS; depth += 1) {
       const source = await this.deps.prisma.message.findUnique({
         where: { id: currentSourceMessageId },
-        select: { replyTo: { select: { runId: true } } },
+        select: { blocks: true, replyTo: { select: { runId: true } } },
       });
-      const parentRunId = source?.replyTo?.runId;
+      const blocks = Array.isArray(source?.blocks) ? (source.blocks as MessageBlock[]) : [];
+      const returnToMessageId = botMessageContext(blocks)?.returnToMessageId;
+      const returnTarget =
+        !source?.replyTo?.runId && returnToMessageId
+          ? await this.deps.prisma.message.findUnique({
+              where: { id: returnToMessageId },
+              select: { runId: true },
+            })
+          : null;
+      const parentRunId = source?.replyTo?.runId ?? returnTarget?.runId;
       if (!parentRunId || visitedRunIds.has(parentRunId)) return null;
       visitedRunIds.add(parentRunId);
       const external = await this.deps.prisma.externalMessage.findUnique({
         where: { runId: parentRunId },
         select: {
+          id: true,
           replyThreadId: true,
-          externalConversation: { select: { conversationId: true } },
+          externalConversation: { select: { id: true, conversationId: true } },
         },
       });
       if (external) return external;
@@ -368,6 +455,31 @@ export class TeamChatBridge {
         select: { sourceMessageId: true },
       });
       currentSourceMessageId = parent?.sourceMessageId ?? null;
+    }
+    return null;
+  }
+
+  private async findExternalOriginForRun(runId: string) {
+    const run = await this.deps.prisma.run.findUnique({
+      where: { id: runId },
+      select: { sourceMessageId: true },
+    });
+    return this.findExternalOrigin(run?.sourceMessageId ?? null);
+  }
+
+  private async pendingAsk(runId: string) {
+    const messages = await this.deps.prisma.message.findMany({
+      where: { runId, role: "bot" },
+      orderBy: { seq: "desc" },
+      select: { id: true, blocks: true },
+    });
+    for (const message of messages) {
+      const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
+      const ask = blocks.find(
+        (block): block is Extract<MessageBlock, { kind: "ask" }> =>
+          block.kind === "ask" && block.status !== "answered",
+      );
+      if (ask) return { messageId: message.id, ask };
     }
     return null;
   }
@@ -554,6 +666,7 @@ export class TeamChatBridge {
     content: string;
     batchContext: string | null;
     externalConversation: {
+      id: string;
       spaceId: string;
       botId: string;
       userId: string;
@@ -562,6 +675,7 @@ export class TeamChatBridge {
   }): Promise<void> {
     const thread = message.externalConversation.thread;
     if (!thread) throw new Error("Team chat conversation has no Rakazo thread");
+    if (await this.answerPendingInput(message)) return;
     const prompt =
       message.batchContext ??
       teamChatPrompt(this.deps.provider.id, message.senderName, message.content);
@@ -589,6 +703,124 @@ export class TeamChatBridge {
       },
     });
     await this.deps.jobs.enqueue(runContinueJob(sent.runId));
+  }
+
+  private async answerPendingInput(message: {
+    id: string;
+    content: string;
+    replyThreadId?: string | null;
+    externalConversation: {
+      id: string;
+      spaceId: string;
+      userId: string;
+    };
+  }): Promise<boolean> {
+    const waiting = await this.deps.prisma.run.findMany({
+      where: {
+        spaceId: message.externalConversation.spaceId,
+        status: "waiting_input",
+        teamChatInputMirroredAt: { not: null },
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: BATCH_SIZE,
+      select: { id: true, threadId: true },
+    });
+    const candidates: Array<{
+      runId: string;
+      threadId: string;
+      messageId: string;
+      ask: Extract<MessageBlock, { kind: "ask" }>;
+    }> = [];
+    for (const run of waiting) {
+      const origin = await this.findExternalOriginForRun(run.id);
+      if (
+        !origin ||
+        origin.externalConversation.id !== message.externalConversation.id ||
+        (origin.replyThreadId ?? null) !== (message.replyThreadId ?? null)
+      ) {
+        continue;
+      }
+      const pending = await this.pendingAsk(run.id);
+      if (pending) candidates.push({ runId: run.id, threadId: run.threadId, ...pending });
+    }
+    if (candidates.length === 0) return false;
+    if (candidates.length > 1) {
+      await this.rejectExternalAnswer(
+        message.id,
+        message,
+        "More than one question is waiting in this conversation. Open Rakazo to answer the intended one.",
+      );
+      return true;
+    }
+    const candidate = candidates[0]!;
+    if (candidate.ask.input === "secret") {
+      await this.rejectExternalAnswer(
+        message.id,
+        message,
+        "This answer is secret. Open Rakazo to provide it securely.",
+      );
+      return true;
+    }
+    const answer = teamChatAnswer(candidate.ask, message.content);
+    if (!answer) {
+      await this.rejectExternalAnswer(
+        message.id,
+        message,
+        `That did not match the available choices.\n\n${teamChatQuestionText(candidate.ask)}`,
+      );
+      return true;
+    }
+    if (!this.deps.events.answerRunInput) {
+      throw new Error("Team chat input continuation is unavailable");
+    }
+    const answered = await this.deps.events.answerRunInput({
+      spaceId: message.externalConversation.spaceId,
+      threadId: candidate.threadId,
+      runId: candidate.runId,
+      messageId: candidate.messageId,
+      answeredByUserId: message.externalConversation.userId,
+      answer,
+      sourceExternalMessageId: message.id,
+    });
+    if (!answered) {
+      await this.rejectExternalAnswer(
+        message.id,
+        message,
+        "That question is no longer awaiting an answer.",
+      );
+      return true;
+    }
+    await this.deps.jobs.enqueue(runContinueJob(candidate.runId)).catch((error) => {
+      console.error("team chat answer enqueue", error);
+    });
+    return true;
+  }
+
+  private async rejectExternalAnswer(
+    externalMessageId: string,
+    message: {
+      replyThreadId?: string | null;
+      externalConversation: { id: string };
+    },
+    content: string,
+  ): Promise<void> {
+    const conversation = await this.deps.prisma.externalConversation.findUniqueOrThrow({
+      where: { id: message.externalConversation.id },
+      select: { conversationId: true },
+    });
+    const sent = await this.deps.provider.send({
+      conversationId: conversation.conversationId,
+      replyThreadId: message.replyThreadId ?? null,
+      content,
+    });
+    await this.deps.prisma.externalMessage.update({
+      where: { id: externalMessageId },
+      data: {
+        status: "ignored",
+        providerReplyHandle: sent.handle,
+        deliveredAt: new Date(),
+      },
+    });
   }
 
   private async deliverCompletion(message: {

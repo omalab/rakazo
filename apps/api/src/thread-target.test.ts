@@ -171,7 +171,7 @@ describe("message thumbs-up", () => {
       kind: "bot",
       botId: "bot-1",
       threadId: "thread-1",
-      bot: { computer: null },
+      bot: { computer: null, userId: "agent-owner" },
     } as ThreadTarget;
 
     await expect(
@@ -201,6 +201,7 @@ describe("message thumbs-up", () => {
         data: expect.objectContaining({
           sourceMessageId: "message-1",
           trigger: "reaction",
+          userId: "agent-owner",
         }),
       }),
     );

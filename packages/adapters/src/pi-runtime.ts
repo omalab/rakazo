@@ -39,6 +39,12 @@ function catalogModels(): Models {
   return catalogModelsCache;
 }
 const MAX_PARALLEL_SUBAGENTS = 4;
+const DEFAULT_WORKER_MAX_TOOL_CALLS = 12;
+const MAX_WORKER_TOOL_CALLS = 40;
+const DEFAULT_WORKER_DURATION_MS = 120_000;
+const MAX_WORKER_DURATION_MS = 600_000;
+const MAX_WORKER_CONTEXT_CHARS = 12_000;
+const WORKER_INSTRUCTION_CONTEXT_CHARS = 4_000;
 // Reasoning-capable models must not start at "off": for OpenRouter, pi-ai maps
 // that to reasoning.effort "none", which 400s on endpoints that mandate
 // reasoning (e.g. google/gemini-3.7-flash). Keep a real level when model.reasoning
@@ -65,6 +71,66 @@ export function maxToolCallsPerTurn(env: NodeJS.ProcessEnv = process.env): numbe
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   return Math.floor(parsed);
+}
+
+export function workerExecutionBudget(args: Record<string, unknown>): {
+  maxToolCalls: number;
+  maxDurationMs: number;
+} {
+  return {
+    maxToolCalls: boundedPositiveInteger(
+      args.max_tool_calls,
+      DEFAULT_WORKER_MAX_TOOL_CALLS,
+      1,
+      MAX_WORKER_TOOL_CALLS,
+    ),
+    maxDurationMs:
+      boundedPositiveInteger(
+        args.max_duration_seconds,
+        DEFAULT_WORKER_DURATION_MS / 1_000,
+        5,
+        MAX_WORKER_DURATION_MS / 1_000,
+      ) * 1_000,
+  };
+}
+
+export function boundWorkerContext(
+  task: string,
+  instructions: string,
+): { task: string; instructions: string } {
+  const normalizedTask = task.trim();
+  const normalizedInstructions = instructions.trim();
+  if (normalizedTask.length + normalizedInstructions.length <= MAX_WORKER_CONTEXT_CHARS) {
+    return { task: normalizedTask, instructions: normalizedInstructions };
+  }
+  const instructionBudget = Math.min(
+    normalizedInstructions.length,
+    WORKER_INSTRUCTION_CONTEXT_CHARS,
+  );
+  const taskBudget = Math.min(normalizedTask.length, MAX_WORKER_CONTEXT_CHARS - instructionBudget);
+  const remaining = MAX_WORKER_CONTEXT_CHARS - taskBudget - instructionBudget;
+  return {
+    task: truncateWorkerContext(normalizedTask, taskBudget + remaining),
+    instructions: truncateWorkerContext(normalizedInstructions, instructionBudget),
+  };
+}
+
+function boundedPositiveInteger(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  ceiling: number,
+): number {
+  const parsed = Number(value);
+  const integral = Math.floor(parsed);
+  if (!Number.isFinite(parsed) || integral < minimum) return fallback;
+  return Math.min(integral, ceiling);
+}
+
+function truncateWorkerContext(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  const suffix = "[worker context truncated]";
+  return `${value.slice(0, Math.max(0, limit - suffix.length))}${suffix}`;
 }
 
 export class PiAgentRuntime implements AgentRuntime {
@@ -608,6 +674,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           name: String(raw.name ?? "helper"),
           task: String(raw.task ?? ""),
           instructions: raw.instructions ? String(raw.instructions) : "",
+          ...(raw.max_tool_calls === undefined
+            ? {}
+            : { max_tool_calls: Number(raw.max_tool_calls) }),
+          ...(raw.max_duration_seconds === undefined
+            ? {}
+            : { max_duration_seconds: Number(raw.max_duration_seconds) }),
         };
       }
       if (tool.name === "spawn_bot") {
@@ -631,6 +703,14 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
     },
     execute: async (toolCallId, params) => {
       const args = (params ?? {}) as Record<string, unknown>;
+      const incomplete = host.workerIncomplete?.();
+      if (incomplete) {
+        return {
+          content: [{ type: "text", text: incomplete }],
+          details: { incomplete: true },
+          terminate: true,
+        };
+      }
       const executionId =
         toolCallId || `${host.request.runId}:${tool.name}:${host.toolCallSeq.value++}`;
       host.queue.push({ type: "tool", name: tool.name, args, executionId });
@@ -724,8 +804,13 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     String(args.name ?? "helper")
       .trim()
       .slice(0, 80) || "helper";
-  const task = String(args.task ?? "").trim();
-  const extra = args.instructions ? String(args.instructions).trim() : "";
+  const context = boundWorkerContext(
+    String(args.task ?? ""),
+    args.instructions ? String(args.instructions) : "",
+  );
+  const task = context.task;
+  const extra = context.instructions;
+  const budget = workerExecutionBudget(args);
   host.queue.push({
     type: "subagent",
     agentId,
@@ -738,23 +823,46 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
   const childDefs = (host.request.tools.length ? host.request.tools : builtinAgentTools).filter(
     (tool) => !DELEGATION_TOOL_NAMES.has(tool.name),
   );
-  const nestedHost: ToolHost = { ...host, depth: 1 };
+  let worker: ReturnType<typeof resolveWorkerRuntimeProfile>;
+  try {
+    worker = resolveWorkerRuntimeProfile(host);
+  } catch (error) {
+    const detail = sanitizeError(error instanceof Error ? error.message : String(error));
+    const result = `Worker incomplete: ${detail}`;
+    host.queue.push({ type: "subagent", agentId, name, task, status: "failed", result });
+    host.subagentGate.release();
+    return result;
+  }
+  if (!worker) {
+    const result = `Worker incomplete: unknown configured model ${host.request.workerModel?.provider}/${host.request.workerModel?.id}.`;
+    host.queue.push({ type: "subagent", agentId, name, task, status: "failed", result });
+    host.subagentGate.release();
+    return result;
+  }
+  const workerState: { toolCalls: number; incomplete?: string } = { toolCalls: 0 };
+  const nestedHost: ToolHost = {
+    ...host,
+    depth: 1,
+    workerIncomplete: () => workerState.incomplete,
+  };
   const nested = new Agent({
     streamFn: (m, ctx, options) =>
-      host.models.streamSimple(m, ctx, reliableStreamOptions(m, options)),
-    getApiKey: async () => host.apiKey,
+      worker.models.streamSimple(m, ctx, reliableStreamOptions(m, options)),
+    getApiKey: async () => worker.apiKey,
     transformContext: async (messages) => pruneComputerScreenshotContext(messages),
     initialState: {
       systemPrompt: [
         `You are a Rakazo subagent named "${name}".`,
         "You run inside the parent bot's turn — you are not a separate bot chat.",
+        `This assignment is limited to ${budget.maxToolCalls} tool calls and ${Math.floor(budget.maxDurationMs / 1_000)} seconds.`,
+        "Use only the supplied task and instructions as context. Return artifacts and evidence; do not claim work beyond the proof you produced.",
         "Complete the task and return a concise result. Do not spawn bots or further subagents.",
         extra,
       ]
         .filter(Boolean)
         .join(" "),
-      model: host.model,
-      thinkingLevel: thinkingLevelFor(host.model, host.request.model.thinkingLevel),
+      model: worker.model,
+      thinkingLevel: thinkingLevelFor(worker.model, worker.selection.thinkingLevel),
       tools: toAgentTools(childDefs, nestedHost),
       messages: [],
     },
@@ -765,6 +873,12 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
   let lastPush = 0;
   nested.subscribe((event) => {
     if (event.type === "tool_execution_start") {
+      workerState.toolCalls += 1;
+      if (workerState.toolCalls > budget.maxToolCalls) {
+        workerState.incomplete = `Worker incomplete: reached the ${budget.maxToolCalls} tool-call budget.`;
+        nested.abort();
+        return;
+      }
       if (!consumeToolCall(host)) return;
       const toolName = "toolName" in event && event.toolName ? String(event.toolName) : "a tool";
       host.queue.push({
@@ -802,8 +916,8 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
           type: "usage",
           inputTokens: event.message.usage.input ?? 0,
           outputTokens: event.message.usage.output ?? 0,
-          provider: host.model.provider,
-          model: host.model.id,
+          provider: worker.model.provider,
+          model: worker.model.id,
         });
       }
     }
@@ -823,25 +937,35 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     }
     const onAbort = () => nested.abort();
     host.signal.addEventListener("abort", onAbort);
-    await nested.prompt(task || "Complete the delegated task.");
-    await nested.waitForIdle();
-    host.signal.removeEventListener("abort", onAbort);
+    const timeout = setTimeout(() => {
+      workerState.incomplete = `Worker incomplete: reached the ${Math.floor(budget.maxDurationMs / 1_000)}-second duration budget.`;
+      nested.abort();
+    }, budget.maxDurationMs);
+    timeout.unref?.();
+    try {
+      await nested.prompt(task || "Complete the delegated task.");
+      await nested.waitForIdle();
+    } finally {
+      clearTimeout(timeout);
+      host.signal.removeEventListener("abort", onAbort);
+    }
     // Shared-budget abort leaves errorMessage on the nested agent; surface it as a
-    // completed stop rather than a failed subagent chip.
+    // bounded incomplete result rather than accepting unverified partial work.
     const budgetExceeded = host.toolCallBudget.exceeded;
     const error = nested.state.errorMessage;
-    if (error && !budgetExceeded) {
+    if (workerState.incomplete || budgetExceeded) {
+      const message =
+        workerState.incomplete ??
+        `Worker incomplete: the parent request reached its ${host.toolCallBudget.limit} tool-call budget.`;
+      host.queue.push({ type: "subagent", agentId, name, task, status: "failed", result: message });
+      return message;
+    }
+    if (error) {
       const message = sanitizeError(error);
       host.queue.push({ type: "subagent", agentId, name, task, status: "failed", result: message });
       return `Subagent failed: ${message}`;
     }
-    const budgetMessage = budgetExceeded
-      ? toolCallBudgetExceededMessage(host.toolCallBudget.limit)
-      : undefined;
-    const result =
-      budgetMessage && streamed.trim()
-        ? `${streamed.trim()}\n\n${budgetMessage}`
-        : budgetMessage || streamed || assistantText(nested.state.messages.at(-1)) || "done.";
+    const result = streamed || assistantText(nested.state.messages.at(-1)) || "done.";
     const clipped = result.length > 12_000 ? `${result.slice(0, 12_000)}…` : result;
     host.queue.push({
       type: "subagent",
@@ -860,6 +984,40 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     host.nestedAgents.delete(nested);
     host.subagentGate.release();
   }
+}
+
+function resolveWorkerRuntimeProfile(host: ToolHost):
+  | {
+      selection: AgentRunRequest["model"];
+      models: Models;
+      model: Model<Api>;
+      apiKey: string | undefined;
+    }
+  | undefined {
+  const selection = host.request.workerModel;
+  if (!selection) {
+    return {
+      selection: host.request.model,
+      models: host.models,
+      model: host.model,
+      apiKey: host.apiKey,
+    };
+  }
+  const provider = selection.provider === "scripted" ? "openrouter" : selection.provider;
+  const modelId = selection.id.trim();
+  const models = modelsForRequest({ model: selection }, provider);
+  let model = models.getModel(provider, modelId);
+  if (!model && provider === "openrouter" && modelId) {
+    model = configuredOpenRouterModel(modelId);
+  }
+  if (!model) return undefined;
+  const apiKey = selection.oauth
+    ? undefined
+    : selection.provider === OPENAI_COMPATIBLE_PROVIDER_ID
+      ? selection.apiKey || "local"
+      : (selection.apiKey ??
+        (provider === "openrouter" ? process.env.OPENROUTER_API_KEY : undefined));
+  return { selection, models, model, apiKey };
 }
 
 function parametersFor(tool: ConnectorTool) {
@@ -1135,6 +1293,8 @@ interface ToolHost {
   signal: AbortSignal;
   depth: number;
   pausePending: boolean;
+  /** Prevent a nested worker from executing the tool call that crossed its local budget. */
+  workerIncomplete?: () => string | undefined;
 }
 
 function toolCallBudgetExceededMessage(limit: number) {

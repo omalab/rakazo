@@ -8,12 +8,12 @@ Same as the README quick start: `.env` from `.env.example`, Postgres via Compose
 
 ## Published images (no checkout)
 
-Pull Postgres and `ghcr.io/elie222/rakazo/app` into any empty folder. No clone or image build.
+Pull Postgres and `ghcr.io/omalab/rakazo/app` into any empty folder. No clone or image build.
 Requires Docker Engine, the Compose plugin, curl, and OpenSSL.
 
 ```bash
 mkdir -p rakazo && cd rakazo &&
-curl -fsSLO https://raw.githubusercontent.com/elie222/rakazo/main/infra/compose/install-images.sh &&
+curl -fsSLO https://raw.githubusercontent.com/omalab/rakazo/main/infra/compose/install-images.sh &&
 bash install-images.sh
 ```
 
@@ -62,14 +62,14 @@ bash install-images.sh
 
 Stage C (`docker compose pull`) uses `RAKAZO_IMAGE`, `RAKAZO_IMAGE_TAG`,
 `RAKAZO_COMPUTER_IMAGE`, and `RAKAZO_COMPUTER_IMAGE_TAG` (defaults
-`ghcr.io/elie222/rakazo/{app,computer}`). When GHCR is unreachable, override those
+`ghcr.io/omalab/rakazo/{app,computer}`). When GHCR is unreachable, override those
 four in `.env` to a registry you control — keep app and computer on the same
 mirror. Do not rely on vendor-specific CDN defaults:
 
 ```env
-RAKAZO_IMAGE=registry.example.com/mirror/elie222/rakazo/app
+RAKAZO_IMAGE=registry.example.com/mirror/omalab/rakazo/app
 RAKAZO_IMAGE_TAG=edge
-RAKAZO_COMPUTER_IMAGE=registry.example.com/mirror/elie222/rakazo/computer
+RAKAZO_COMPUTER_IMAGE=registry.example.com/mirror/omalab/rakazo/computer
 RAKAZO_COMPUTER_IMAGE_TAG=edge
 ```
 
@@ -82,7 +82,7 @@ pairing is unchanged — set both tags to the same published multi-arch release
 them; configure the Docker daemon `registry-mirrors` or vendor those images.
 
 `SANDBOX_PROVIDER` defaults to `docker`. The images Compose file runs a sandbox supervisor
-(from the app image, on the internal network only) and pulls `ghcr.io/elie222/rakazo/computer`.
+(from the app image, on the internal network only) and pulls `ghcr.io/omalab/rakazo/computer`.
 Signup and local Docker computers work without an E2B account. Optional remote providers: set
 `SANDBOX_PROVIDER` to `e2b`, `daytona`, or `box` and add the matching API key. Compose requires
 `SANDBOX_SUPERVISOR_TOKEN` for the Docker path; leave it empty and `compose up` fails closed.
@@ -188,6 +188,9 @@ WAKEUP_DRIVER=graphile
 SANDBOX_IDLE_MS=600000    # pause the bot computer after 10 minutes idle
 SANDBOX_COMMAND_TIMEOUT_MS=300000 # stop a shell command after 5 minutes
 MAX_TOOL_CALLS_PER_TURN=  # optional Pi turn tool-call fuse; unset/0 = unlimited
+PI_WORKER_PROVIDER=       # optional provider for bounded run_subagent work; set with PI_WORKER_MODEL
+PI_WORKER_MODEL=          # optional tactical worker model; omitting both retains the manager model
+PI_WORKER_THINKING_LEVEL=low # off|minimal|low|medium|high|xhigh|max
 E2B_API_KEY=              # when SANDBOX_PROVIDER=e2b
 DAYTONA_API_KEY=          # when SANDBOX_PROVIDER=daytona
 BOX_API_KEY=              # when SANDBOX_PROVIDER=box
@@ -224,7 +227,7 @@ Do not commit `.env`. Never put `COMPOSIO_API_KEY`, OpenRouter keys, or provider
 The Electron desktop app is a client of the same API. Docker and E2B still apply. On first launch, Electron asks the deployment owner whether bots should keep using Docker or run on this Mac as you. `SANDBOX_PROVIDER=desktop` is a separate, explicit provider that always runs commands on the service host.
 
 - **Published images** (`docker-compose.images.yml`) default to `SANDBOX_PROVIDER=docker` with a
-  local supervisor and published `ghcr.io/elie222/rakazo/computer` image. No E2B account required.
+  local supervisor and published `ghcr.io/omalab/rakazo/computer` image. No E2B account required.
   Optional: set `e2b`, `daytona`, or `box` plus the matching API key for remote computers.
 - **Docker** is the quick-start default for published images and for a source checkout / full local
   Compose stack. Workspace bots share a persistent Team Computer by default; Private computers are
@@ -428,9 +431,9 @@ this repository that is:
 
 | Image | Contents |
 | --- | --- |
-| `ghcr.io/elie222/rakazo/app` | api, worker, web, and sandbox supervisor — one image, multiple commands |
-| `ghcr.io/elie222/rakazo/computer` | Linux desktop used as each bot computer |
-| `ghcr.io/elie222/rakazo/updater` | the updater sidecar, plus the Docker CLI |
+| `ghcr.io/omalab/rakazo/app` | api, worker, web, and sandbox supervisor — one image, multiple commands |
+| `ghcr.io/omalab/rakazo/computer` | Linux desktop used as each bot computer |
+| `ghcr.io/omalab/rakazo/updater` | the updater sidecar, plus the Docker CLI |
 
 `infra/compose/docker-compose.images.yml` is the no-checkout path for those app and computer tags
 plus Postgres. The supervisor runs from the app image on the internal network only (not a separate
