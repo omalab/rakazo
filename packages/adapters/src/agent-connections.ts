@@ -2,8 +2,6 @@ import type { JobPublisher } from "@rakazo/adapter-kit";
 import { messagingDeliverJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
 import {
-  botMessageHopExhausted,
-  botMessageHopLimitError,
   buildBotMessageWakePrompt,
   clampBotMessage,
   nextBotMessageHop,
@@ -240,12 +238,6 @@ export async function messageConnectedAgent(
   const hop = nextBotMessageHop(
     await currentBotMessageHop(deps.prisma, run.sourceMessageId ?? null),
   );
-  if (botMessageHopExhausted(hop)) {
-    return {
-      ok: false,
-      error: botMessageHopLimitError(),
-    };
-  }
 
   const target = await deps.prisma.bot.findUnique({
     where: { id: targetIdentity.botId },

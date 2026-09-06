@@ -1,7 +1,7 @@
 import type { JobPublisher, TeamChatInboundMessage, TeamChatProvider } from "@rakazo/adapter-kit";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import { AutomatedSenderPoliciesSchema, type MessageBlock } from "@rakazo/contracts";
-import { BOT_MESSAGE_MAX_HOPS, botMessageContext } from "@rakazo/core";
+import { botMessageContext } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import type { TeamChatEngagementJudge } from "./team-chat-judge.js";
 
@@ -424,7 +424,7 @@ export class TeamChatBridge {
   private async findExternalOrigin(sourceMessageId: string | null) {
     let currentSourceMessageId: string | null = sourceMessageId;
     const visitedRunIds = new Set<string>();
-    for (let depth = 0; currentSourceMessageId && depth <= BOT_MESSAGE_MAX_HOPS; depth += 1) {
+    while (currentSourceMessageId) {
       const source = await this.deps.prisma.message.findUnique({
         where: { id: currentSourceMessageId },
         select: { blocks: true, replyTo: { select: { runId: true } } },

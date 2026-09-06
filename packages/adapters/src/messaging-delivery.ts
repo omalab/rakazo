@@ -6,7 +6,7 @@ import type {
 } from "@rakazo/adapter-kit";
 import { messagingDeliverJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { botMessageHopExhausted, nextBotMessageHop } from "@rakazo/core";
+import { nextBotMessageHop } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { appendEventInTransaction, createThreadMessageInTransaction } from "@rakazo/db";
 
@@ -109,7 +109,7 @@ async function mirrorRun(deps: MessagingDeliveryDeps, runId: string): Promise<vo
 /**
  * Channel runs post to the group with an attribution prefix, then fan the
  * post out internally to peer approved bots: context only by default, a
- * waking run on @-mention, bounded by the shared bot-message hop budget.
+ * waking run on @-mention.
  */
 async function mirrorChannelRun(
   deps: MessagingDeliveryDeps,
@@ -188,7 +188,7 @@ async function mirrorChannelRun(
       const mentioned = peerBot?.name
         ? new RegExp(`@${escapeRegExp(peerBot.name)}\\b`, "i").test(text)
         : false;
-      if (mentioned && !botMessageHopExhausted(hop)) {
+      if (mentioned) {
         const sent = await deps.events.sendUserMessage({
           spaceId: peerIdentity.spaceId,
           threadId: peerThread.id,

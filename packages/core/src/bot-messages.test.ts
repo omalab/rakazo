@@ -2,10 +2,8 @@ import { BOT_DESCRIPTION_MAX_LENGTH } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import {
   BOT_DIRECTORY_DESCRIPTIONS_MAX_LENGTH,
-  BOT_MESSAGE_MAX_HOPS,
   BOT_MESSAGE_MAX_LENGTH,
   botMessageAllowsSilence,
-  botMessageHopExhausted,
   buildBotMessageWakePrompt,
   clampBotMessage,
   formatBotRosterLines,
@@ -40,11 +38,7 @@ describe("bot message silence", () => {
   });
 });
 
-describe("hop bounding", () => {
-  it("allows twenty bot-to-bot deliveries per user-started chain", () => {
-    expect(BOT_MESSAGE_MAX_HOPS).toBe(20);
-  });
-
+describe("hop tracking", () => {
   it("starts a chain at 1 when a person's message woke the sender", () => {
     expect(nextBotMessageHop(undefined)).toBe(1);
     expect(nextBotMessageHop(0)).toBe(1);
@@ -55,19 +49,8 @@ describe("hop bounding", () => {
     expect(nextBotMessageHop(5)).toBe(6);
   });
 
-  it("refuses only past the limit", () => {
-    expect(botMessageHopExhausted(BOT_MESSAGE_MAX_HOPS)).toBe(false);
-    expect(botMessageHopExhausted(BOT_MESSAGE_MAX_HOPS + 1)).toBe(true);
-  });
-
-  it("stops a two-bot volley in a bounded number of deliveries", () => {
-    let hop = nextBotMessageHop(undefined);
-    let delivered = 0;
-    while (!botMessageHopExhausted(hop)) {
-      delivered += 1;
-      hop = nextBotMessageHop(hop);
-    }
-    expect(delivered).toBe(BOT_MESSAGE_MAX_HOPS);
+  it("keeps tracking long collaborations without imposing a user-facing stop", () => {
+    expect(nextBotMessageHop(20)).toBe(21);
   });
 });
 

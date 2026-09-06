@@ -1,4 +1,3 @@
-import { BOT_MESSAGE_MAX_HOPS } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { handoffToGroupBot } from "./group-handoff.js";
@@ -112,14 +111,14 @@ describe("group handoff ownership", () => {
     expect(runCreate).not.toHaveBeenCalled();
   });
 
-  it("caps longer multi-agent handoff chains", async () => {
+  it("allows longer multi-agent handoff chains", async () => {
     const { deps, runCreate } = harness([
       {
         kind: "handoff",
         fromBotId: "bot-b",
         toBotId: "bot-a",
         text: "Stage twenty",
-        hop: BOT_MESSAGE_MAX_HOPS,
+        hop: 20,
       },
     ]);
 
@@ -128,11 +127,8 @@ describe("group handoff ownership", () => {
         bot_id: "bot-c",
         message: "Stage twenty-one",
       }),
-    ).resolves.toEqual({
-      error:
-        "The 20-hop agent collaboration limit has been reached. Ask the user whether to continue for up to 20 more hops. Continue only if the user explicitly agrees; that user message starts a new chain.",
-    });
-    expect(runCreate).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ ok: true, botId: "bot-c" });
+    expect(runCreate).toHaveBeenCalledOnce();
   });
 
   it("reuses the recorded transfer when a source run is retried", async () => {
