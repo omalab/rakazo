@@ -167,7 +167,7 @@ app.post("/computers", async (c) => {
           : hostGid;
       await assertComputerHomeWritable(serviceHomePath, effectiveUid, effectiveGid);
       if (existing) {
-        await existing.remove({ force: true }).catch(() => undefined);
+        await removeComputerContainer(existing);
       }
       const name = containerNameFor(body.botId);
       const container = await docker.createContainer(
@@ -574,7 +574,7 @@ app.delete("/computers/:id", async (c) => {
     if (!botId) throw new Error("missing computer identity");
     return await withBotLifecycleLock(botId, async () => {
       const { container } = await managedContainer(id, botId, c.req.header("x-rakazo-space-id"));
-      await container.remove({ force: true }).catch(() => undefined);
+      await removeComputerContainer(container);
       clearComputerScreenRegistry(computerScreens, id);
       if (screenNetworkMode !== "internal") {
         await removeBotNetwork(botId);
@@ -585,6 +585,31 @@ app.delete("/computers/:id", async (c) => {
     return c.json({ error: "computer not found" }, 404);
   }
 });
+
+type RemovableComputerContainer = {
+  stop(options?: { t?: number }): Promise<unknown>;
+  remove(options?: { force?: boolean }): Promise<unknown>;
+};
+
+function isFinishedContainerError(error: unknown) {
+  if (!error || typeof error !== "object" || !("statusCode" in error)) return false;
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return statusCode === 304 || statusCode === 404;
+}
+
+/** Let Chromium flush its persistent profile before an image replacement removes the container. */
+export async function removeComputerContainer(container: RemovableComputerContainer) {
+  try {
+    await container.stop({ t: 15 });
+  } catch (error) {
+    if (!isFinishedContainerError(error)) throw error;
+  }
+  try {
+    await container.remove({ force: true });
+  } catch (error) {
+    if (!isFinishedContainerError(error)) throw error;
+  }
+}
 
 function startSupervisor() {
   const port = Number(process.env.SUPERVISOR_PORT ?? 7091);

@@ -45,6 +45,9 @@ describe("graphical computer spec", () => {
     expect(options.HostConfig.Binds).toEqual(["/var/rakazo/homes/abc:/home/rakazo"]);
     expect(options.Env).toContain(`PATH=${COMPUTER_PATH}`);
     expect(options.Env).toContain("NPM_CONFIG_PREFIX=/home/rakazo/.local");
+    expect(options.Env).toContain("LANG=en_US.UTF-8");
+    expect(options.Env).toContain("LANGUAGE=en_US:en");
+    expect(options.Env).toContain("LC_ALL=en_US.UTF-8");
     expect(options.ExposedPorts).toMatchObject({
       "6080/tcp": {},
       "6081/tcp": {},
@@ -138,6 +141,10 @@ describe("graphical computer spec", () => {
     expect(dockerfile).toMatch(/tint2rc/);
     expect(dockerfile).toMatch(/control.py/);
     expect(dockerfile).toMatch(/USER 1000:1000/);
+    expect(dockerfile).toMatch(/locale-gen en_US\.UTF-8/);
+    expect(dockerfile).toMatch(/ENV LANG=en_US\.UTF-8/);
+    expect(dockerfile).toMatch(/ENV LANGUAGE=en_US:en/);
+    expect(dockerfile).toMatch(/ENV LC_ALL=en_US\.UTF-8/);
     expect(start).toMatch(/rakazo-computer-control/);
     expect(start).toMatch(/rakazo-browser/);
     expect(dockerfile).toMatch(/rakazo-desktop-panel/);
@@ -171,6 +178,8 @@ describe("graphical computer spec", () => {
     expect(panel).toMatch(/rakazo-terminal\.desktop/);
     expect(menu).not.toMatch(/xterm -bg #/);
     expect(start).not.toMatch(/windowsize 1280 800/);
+    expect(start).toMatch(/trap shutdown TERM INT/);
+    expect(start).toMatch(/pkill -TERM -f .*chromium/);
   });
 
   it("ships the baseline agent toolchain without runtime package installation", () => {
@@ -245,7 +254,10 @@ describe("graphical computer spec", () => {
       };
 
       try {
-        expect(run(":1")).toContain(`--user-data-dir=${home}/.browser-profiles/chromium`);
+        const primary = run(":1");
+        expect(primary).toContain(`--user-data-dir=${home}/.browser-profiles/chromium`);
+        expect(primary).toContain("--lang=en-US");
+        expect(primary).toContain("--accept-lang=en-US,en");
         expect(run(":2")).toContain(`--user-data-dir=${home}/.browser-profiles/chromium-screen-2`);
         const explicit = run(":3", [`--user-data-dir=${home}/custom-profile`]);
         expect(explicit).toContain(`--user-data-dir=${home}/custom-profile`);

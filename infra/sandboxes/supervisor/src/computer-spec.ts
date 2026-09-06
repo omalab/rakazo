@@ -90,6 +90,9 @@ export function containerCreateOptions(input: ComputerCreateInput) {
       `PATH=${COMPUTER_PATH}`,
       "NPM_CONFIG_PREFIX=/home/rakazo/.local",
       "PIP_USER=1",
+      "LANG=en_US.UTF-8",
+      "LANGUAGE=en_US:en",
+      "LC_ALL=en_US.UTF-8",
       ...(input.controlToken ? [`RAKAZO_COMPUTER_CONTROL_TOKEN=${input.controlToken}`] : []),
     ],
     Labels: {

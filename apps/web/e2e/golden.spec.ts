@@ -73,6 +73,14 @@ test("takeover, routine, plugins, and export are reachable", async ({ page }, te
   await captureScreenshot(page, testInfo, "08-protected-input-request");
   await openBlockedComputer.click();
   await expect(page.getByRole("button", { name: "Close computer" })).toBeVisible();
+  const takeoverScreen = page.getByTitle("Bot screen");
+  await expect(takeoverScreen).toHaveAttribute("src", /(?:\/novnc\/|^fake:\/\/screen\/)/, {
+    timeout: 30_000,
+  });
+  await expect(takeoverScreen).toHaveAttribute("src", /view_only=false/);
+  await expect
+    .poll(() => takeoverScreen.evaluate((element) => getComputedStyle(element).pointerEvents))
+    .toBe("auto");
   await expect(page.getByRole("button", { name: "Skip", exact: true }).last()).toBeVisible();
   await expect(page.getByRole("button", { name: "I’m done", exact: true }).last()).toBeVisible();
   if (process.env.SANDBOX_PROVIDER === "box") await waitForBoxFramebuffer(page);

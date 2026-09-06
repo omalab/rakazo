@@ -56,6 +56,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     openssh-client \
     procps \
     bash \
+    locales \
     chromium \
     pcmanfm \
     tint2 \
@@ -63,6 +64,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
     dbus-x11 \
     xdg-utils \
+  && sed -i 's/^# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+  && locale-gen en_US.UTF-8 \
   && rm -rf /var/lib/apt/lists/* \
   && npm install --global --omit=dev \
     @beads/bd@1.2.2 \
@@ -106,6 +109,9 @@ RUN command -v node \
 ENV DISPLAY=:1
 ENV HOME=/home/rakazo
 ENV PATH=/home/rakazo/.local/bin:/home/rakazo/.bun/bin:$PATH
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US:en
+ENV LC_ALL=en_US.UTF-8
 WORKDIR /home/rakazo
 # --chmod normalizes modes: a restrictive host umask (e.g. 077 on hardened hosts) would
 # otherwise leave these files unreadable to USER 1000 at runtime.
