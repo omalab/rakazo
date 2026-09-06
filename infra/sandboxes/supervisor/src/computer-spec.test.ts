@@ -13,6 +13,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   COMPUTER_IMAGE,
+  COMPUTER_PATH,
   computerNetworkNameFor,
   computerNetworkNamesForCleanup,
   containerCreateOptions,
@@ -42,9 +43,7 @@ describe("graphical computer spec", () => {
     expect(options).not.toHaveProperty("Entrypoint");
     expect(JSON.stringify(options)).not.toMatch(/sleep/);
     expect(options.HostConfig.Binds).toEqual(["/var/rakazo/homes/abc:/home/rakazo"]);
-    expect(options.Env).toContain(
-      "PATH=/home/rakazo/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    );
+    expect(options.Env).toContain(`PATH=${COMPUTER_PATH}`);
     expect(options.Env).toContain("NPM_CONFIG_PREFIX=/home/rakazo/.local");
     expect(options.ExposedPorts).toMatchObject({
       "6080/tcp": {},
@@ -172,6 +171,38 @@ describe("graphical computer spec", () => {
     expect(panel).toMatch(/rakazo-terminal\.desktop/);
     expect(menu).not.toMatch(/xterm -bg #/);
     expect(start).not.toMatch(/windowsize 1280 800/);
+  });
+
+  it("ships the baseline agent toolchain without runtime package installation", () => {
+    const dockerfile = readFileSync(
+      path.resolve(import.meta.dirname, "../../computer/Dockerfile"),
+      "utf8",
+    );
+    const start = readFileSync(
+      path.resolve(import.meta.dirname, "../../computer/start.sh"),
+      "utf8",
+    );
+
+    for (const command of [
+      "node",
+      "git",
+      "gh",
+      "bd",
+      "dolt",
+      "uv",
+      "bun",
+      "chromium",
+      "python3",
+      "curl",
+    ]) {
+      expect(dockerfile, command).toContain(`command -v ${command}`);
+    }
+    expect(dockerfile).toContain("ca-certificates");
+    expect(dockerfile).toContain("process.versions.node");
+    expect(dockerfile).toContain('PATH="$HOME/.bun/bin:$PATH"');
+    expect(COMPUTER_PATH).toContain("/home/rakazo/.local/bin");
+    expect(COMPUTER_PATH).toContain("/home/rakazo/.bun/bin");
+    expect(start).toContain("$AGENT_HOME/.local/bin:$AGENT_HOME/.bun/bin:");
   });
 
   it.skipIf(process.platform === "win32")(

@@ -3312,3 +3312,31 @@ msgstr "Treat like a person"
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Use Arthur's default guidance"
 msgstr "Use Arthur's default guidance"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "People"
+msgstr "People"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Loading people"
+msgstr "Loading people"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Existing account email"
+msgstr "Existing account email"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Add person"
+msgstr "Add person"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Access added"
+msgstr "Access added"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Could not load people"
+msgstr "Could not load people"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Could not add this person"
+msgstr "Could not add this person"

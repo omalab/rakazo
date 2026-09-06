@@ -13,6 +13,7 @@ import { z } from "zod";
 import {
   COMPUTER_GID,
   COMPUTER_IMAGE,
+  COMPUTER_PATH,
   COMPUTER_UID,
   COMPUTER_USER,
   computerNetworkNameFor,
@@ -244,7 +245,7 @@ app.post("/computers/:id/exec", async (c) => {
         env: [
           `DISPLAY=${layout.display}`,
           "HOME=/home/rakazo",
-          "PATH=/home/rakazo/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          `PATH=${COMPUTER_PATH}`,
           "NPM_CONFIG_PREFIX=/home/rakazo/.local",
           "PIP_USER=1",
           ...Object.entries(body.env ?? {}).map(([k, v]) => `${k}=${v}`),
