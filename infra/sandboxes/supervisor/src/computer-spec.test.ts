@@ -193,6 +193,7 @@ describe("graphical computer spec", () => {
       "bun",
       "composio",
       "codex",
+      "claude",
       "chromium",
       "python3",
       "curl",
@@ -206,6 +207,8 @@ describe("graphical computer spec", () => {
     expect(dockerfile).toContain("composio --version");
     expect(dockerfile).toContain("@openai/codex@0.153.4");
     expect(dockerfile).toContain("codex --version");
+    expect(dockerfile).toContain("@anthropic-ai/claude-code@2.1.263");
+    expect(dockerfile).toContain("claude --version");
     expect(dockerfile).toContain("/etc/profile.d/rakazo-path.sh");
     expect(dockerfile).toContain("$HOME/.local/bin:$HOME/.bun/bin:$PATH");
     expect(COMPUTER_PATH).toContain("/home/rakazo/.local/bin");
