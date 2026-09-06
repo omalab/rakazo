@@ -3340,3 +3340,15 @@ msgstr "Could not load people"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Could not add this person"
 msgstr "Could not add this person"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Notify when there is an update"
+msgstr "Notify when there is an update"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Send to"
+msgstr "Send to"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Rakazo"
+msgstr "Rakazo"
