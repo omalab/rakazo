@@ -78,6 +78,7 @@ import {
   type Me,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   type SpaceNavigation,
+  type ThinkingLevel,
 } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
@@ -777,9 +778,10 @@ export function createRouter(deps: RouterDeps) {
         if (!found) throw new IsolationError();
         return found;
       }),
-      create: authed.bots.create.handler(async ({ context, input }) =>
-        repos.createBot(context.actor, input),
-      ),
+      create: authed.bots.create.handler(async ({ context, input }) => {
+        await validateBotModelOverride(deps, context.actor, input);
+        return repos.createBot(context.actor, input);
+      }),
       duplicate: authed.bots.duplicate.handler(async ({ context, input }) => {
         const source = await repos.getBot(context.actor, input.botId);
         const duplicate = await repos.createBot(context.actor, {
@@ -831,47 +833,8 @@ export function createRouter(deps: RouterDeps) {
           });
           if (!section) throw new IsolationError();
         }
-        if (input.modelProvider && input.modelId) {
-          const credential = await findModelCredential(
-            deps.prisma,
-            context.actor,
-            input.modelProvider,
-          );
-          if (!credential) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "Connect that model provider first",
-            });
-          }
-          const knownModels = [...listPiCatalog(), scriptedCatalogEntry];
-          const inCatalog = knownModels.some(
-            (item) => item.provider === input.modelProvider && item.id === input.modelId,
-          );
-          if (!inCatalog && credential.defaultModel !== input.modelId) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: "Unknown model for that provider",
-            });
-          }
-        }
+        await validateBotModelOverride(deps, context.actor, input, existing);
         const thinkingLevel = input.thinkingLevel;
-        if (input.thinkingLevel) {
-          const provider =
-            input.modelProvider !== undefined ? input.modelProvider : existing.modelProvider;
-          const modelId = input.modelId !== undefined ? input.modelId : existing.modelId;
-          const me = await meDto(deps, context.actor);
-          const effectiveProvider = provider ?? me.defaultProvider;
-          const effectiveModelId = modelId ?? me.defaultModel;
-          if (effectiveProvider && effectiveModelId) {
-            const entry = listPiCatalog().find(
-              (item) => item.provider === effectiveProvider && item.id === effectiveModelId,
-            );
-            const allowed = entry?.thinkingLevels;
-            if (allowed && !allowed.includes(input.thinkingLevel)) {
-              throw new ORPCError("BAD_REQUEST", {
-                message: `Thinking level must be one of: ${allowed.join(", ")}`,
-              });
-            }
-          }
-        }
         await deps.prisma.bot.update({
           where: { id: input.botId },
           data: {
@@ -3754,6 +3717,52 @@ export function createRouter(deps: RouterDeps) {
       ),
     },
   });
+}
+
+async function validateBotModelOverride(
+  deps: RouterDeps,
+  actor: Actor,
+  input: {
+    modelProvider?: string | null;
+    modelId?: string | null;
+    thinkingLevel?: ThinkingLevel | null;
+  },
+  existing?: { modelProvider: string | null; modelId: string | null },
+) {
+  if (input.modelProvider && input.modelId) {
+    const credential = await findModelCredential(deps.prisma, actor, input.modelProvider);
+    if (!credential) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Connect that model provider first",
+      });
+    }
+    const knownModels = [...listPiCatalog(), scriptedCatalogEntry];
+    const inCatalog = knownModels.some(
+      (item) => item.provider === input.modelProvider && item.id === input.modelId,
+    );
+    if (!inCatalog && credential.defaultModel !== input.modelId) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Unknown model for that provider",
+      });
+    }
+  }
+  if (!input.thinkingLevel) return;
+  const provider =
+    input.modelProvider !== undefined ? input.modelProvider : (existing?.modelProvider ?? null);
+  const modelId = input.modelId !== undefined ? input.modelId : (existing?.modelId ?? null);
+  const me = await meDto(deps, actor);
+  const effectiveProvider = provider ?? me.defaultProvider;
+  const effectiveModelId = modelId ?? me.defaultModel;
+  if (!effectiveProvider || !effectiveModelId) return;
+  const entry = listPiCatalog().find(
+    (item) => item.provider === effectiveProvider && item.id === effectiveModelId,
+  );
+  const allowed = entry?.thinkingLevels;
+  if (allowed && !allowed.includes(input.thinkingLevel)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Thinking level must be one of: ${allowed.join(", ")}`,
+    });
+  }
 }
 
 function updaterConfig(deps: RouterDeps): UpdaterProxyConfig {

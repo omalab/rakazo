@@ -2423,11 +2423,15 @@ export function ShellPage() {
     title: string;
     description: string;
     computerMode: ComputerMode;
+    modelProvider: string | null;
+    modelId: string | null;
   }) {
     const bot = await rpc.bots.create({
       ...normalizeCreateBotProfile(input),
       notifyOnFinish: true,
       computerMode: input.computerMode,
+      modelProvider: input.modelProvider,
+      modelId: input.modelId,
     });
     setBots((current) =>
       current.some((item) => item.id === bot.id) ? current : [bot, ...current],
@@ -5877,6 +5881,122 @@ function ComputerModePicker({
   );
 }
 
+type BotModelOption = {
+  key: string;
+  provider: string;
+  modelId: string;
+  label: string;
+};
+
+function useBotModelSelection(modelProvider: string | null, modelId: string | null) {
+  const [modelKey, setModelKey] = useState(
+    modelProvider && modelId ? modelOptionKey(modelProvider, modelId) : "",
+  );
+  const [credentials, setCredentials] = useState<ModelCredential[]>([]);
+  const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
+  const [me, setMe] = useState<Me | null>(null);
+  const [modelMetaReady, setModelMetaReady] = useState(false);
+
+  useEffect(() => {
+    void Promise.all([rpc.models.credentials(), rpc.models.list(), rpc.me()])
+      .then(([nextCredentials, nextCatalog, nextMe]) => {
+        setCredentials(nextCredentials);
+        setCatalog(nextCatalog);
+        setMe(nextMe);
+        setModelMetaReady(true);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const connectedOptions = useMemo(() => {
+    const options: BotModelOption[] = [];
+    const seenOptions = new Set<string>();
+    for (const credential of credentials) {
+      const providerModels = catalog.filter(
+        (entry) => entry.provider === credential.provider && !entry.placeholder,
+      );
+      const credentialInCatalog = Boolean(
+        credential.modelId && providerModels.some((entry) => entry.id === credential.modelId),
+      );
+      const credentialOptions =
+        credential.modelId && !credentialInCatalog
+          ? [
+              {
+                key: modelOptionKey(credential.provider, credential.modelId),
+                provider: credential.provider,
+                modelId: credential.modelId,
+                label: `${credential.label} · ${credential.modelId}`,
+              },
+            ]
+          : providerModels.map((entry) => ({
+              key: modelOptionKey(entry.provider, entry.id),
+              provider: entry.provider,
+              modelId: entry.id,
+              label: `${entry.providerName ?? entry.provider} · ${entry.label}`,
+            }));
+      for (const option of credentialOptions) {
+        if (seenOptions.has(option.key)) continue;
+        seenOptions.add(option.key);
+        options.push(option);
+      }
+    }
+    return options;
+  }, [catalog, credentials]);
+
+  return {
+    modelKey,
+    setModelKey,
+    catalog,
+    me,
+    modelMetaReady,
+    connectedOptions,
+  };
+}
+
+function BotModelSelect({
+  value,
+  options,
+  catalog,
+  me,
+  onChange,
+  testId,
+}: {
+  value: string;
+  options: BotModelOption[];
+  catalog: ModelCatalogEntry[];
+  me: Me | null;
+  onChange: (value: string) => void;
+  testId?: string;
+}) {
+  const { t } = useLingui();
+  return (
+    <label className="mt-4 block text-[14px] text-[var(--rk-muted)]">
+      <Trans>Model</Trans>
+      <select
+        data-testid={testId}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-2 w-full rounded-[11px] border border-[var(--rk-border)] bg-transparent px-3.5 py-3 text-[var(--rk-ink)]"
+      >
+        <option value="">
+          {t`Space default`}
+          {me?.defaultModel
+            ? ` (${catalogLabel(catalog, me.defaultProvider, me.defaultModel) ?? me.defaultModel})`
+            : ""}
+        </option>
+        {value && !options.some((option) => option.key === value) ? (
+          <option value={value}>{parseModelOptionKey(value)?.modelId ?? value}</option>
+        ) : null}
+        {options.map((option) => (
+          <option key={option.key} value={option.key}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function CreateBotForm({
   onCreate,
   onCancel,
@@ -5886,6 +6006,8 @@ function CreateBotForm({
     title: string;
     description: string;
     computerMode: ComputerMode;
+    modelProvider: string | null;
+    modelId: string | null;
   }) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -5894,6 +6016,7 @@ function CreateBotForm({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [computerMode, setComputerMode] = useState<ComputerMode>("team");
+  const modelSelection = useBotModelSelection(null, null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -5902,7 +6025,17 @@ function CreateBotForm({
     setError(null);
     setSubmitting(true);
     try {
-      await onCreate({ name, title, description, computerMode });
+      const selectedModel = modelSelection.modelKey
+        ? parseModelOptionKey(modelSelection.modelKey)
+        : null;
+      await onCreate({
+        name,
+        title,
+        description,
+        computerMode,
+        modelProvider: selectedModel?.provider ?? null,
+        modelId: selectedModel?.modelId ?? null,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : t`Could not create bot`);
     } finally {
@@ -5960,6 +6093,14 @@ function CreateBotForm({
           className="mt-2 w-full rounded-[11px] border border-[var(--rk-border)] bg-transparent px-3.5 py-3 text-[var(--rk-ink)]"
         />
       </label>
+      <BotModelSelect
+        testId="create-bot-model"
+        value={modelSelection.modelKey}
+        options={modelSelection.connectedOptions}
+        catalog={modelSelection.catalog}
+        me={modelSelection.me}
+        onChange={modelSelection.setModelKey}
+      />
       <ComputerModePicker value={computerMode} onChange={setComputerMode} />
       <button
         type="button"
@@ -6015,16 +6156,11 @@ function BotSettings({
   const [autoSpeak, setAutoSpeak] = useState(bot.autoSpeak);
   const [voiceId, setVoiceId] = useState(bot.voiceId ?? "");
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
-  const [modelKey, setModelKey] = useState(
-    bot.modelProvider && bot.modelId ? modelOptionKey(bot.modelProvider, bot.modelId) : "",
-  );
+  const modelSelection = useBotModelSelection(bot.modelProvider, bot.modelId);
+  const { modelKey, setModelKey, catalog, me, modelMetaReady, connectedOptions } = modelSelection;
   const [thinkingLevel, setThinkingLevel] = useState(bot.thinkingLevel ?? "");
   const [teamChatAmbientEnabled, setTeamChatAmbientEnabled] = useState(bot.teamChatAmbientEnabled);
   const [teamChatRules, setTeamChatRules] = useState(bot.teamChatRules);
-  const [credentials, setCredentials] = useState<ModelCredential[]>([]);
-  const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
-  const [me, setMe] = useState<Me | null>(null);
-  const [modelMetaReady, setModelMetaReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -6032,56 +6168,7 @@ function BotSettings({
       .voices({})
       .then(setVoices)
       .catch(() => setVoices([]));
-    void Promise.all([rpc.models.credentials(), rpc.models.list(), rpc.me()])
-      .then(([nextCredentials, nextCatalog, nextMe]) => {
-        setCredentials(nextCredentials);
-        setCatalog(nextCatalog);
-        setMe(nextMe);
-        // Only mark ready on success — a failed catalog load must not clear
-        // an existing thinkingLevel override on save.
-        setModelMetaReady(true);
-      })
-      .catch(() => undefined);
   }, []);
-
-  const connectedOptions: Array<{
-    key: string;
-    provider: string;
-    modelId: string;
-    label: string;
-  }> = [];
-  const seenOptions = new Set<string>();
-  for (const credential of credentials) {
-    const providerModels = catalog.filter(
-      (entry) => entry.provider === credential.provider && !entry.placeholder,
-    );
-    const credentialInCatalog = Boolean(
-      credential.modelId && providerModels.some((entry) => entry.id === credential.modelId),
-    );
-    // Catalog providers expand to every model for that connection. Free-form
-    // credentials (model id not in the catalog) stay a single connected pair.
-    const options =
-      credential.modelId && !credentialInCatalog
-        ? [
-            {
-              key: modelOptionKey(credential.provider, credential.modelId),
-              provider: credential.provider,
-              modelId: credential.modelId,
-              label: `${credential.label} · ${credential.modelId}`,
-            },
-          ]
-        : providerModels.map((entry) => ({
-            key: modelOptionKey(entry.provider, entry.id),
-            provider: entry.provider,
-            modelId: entry.id,
-            label: `${entry.providerName ?? entry.provider} · ${entry.label}`,
-          }));
-    for (const option of options) {
-      if (seenOptions.has(option.key)) continue;
-      seenOptions.add(option.key);
-      connectedOptions.push(option);
-    }
-  }
 
   const effectiveProvider = modelKey
     ? parseModelOptionKey(modelKey)?.provider
@@ -6172,6 +6259,16 @@ function BotSettings({
           className="mt-2 w-full rounded-[11px] border border-[var(--rk-border)] bg-transparent px-3.5 py-3 text-[var(--rk-ink)]"
         />
       </label>
+      <BotModelSelect
+        value={modelKey}
+        options={connectedOptions}
+        catalog={catalog}
+        me={me}
+        onChange={(value) => {
+          setModelKey(value);
+          setThinkingLevel("");
+        }}
+      />
       <details data-testid="bot-settings-advanced" className="group mt-5">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[14px] text-[var(--rk-muted)]">
           <span className="text-[var(--rk-muted)]">
@@ -6185,32 +6282,6 @@ function BotSettings({
         <Suspense fallback={null}>
           <ScratchpadSection botId={bot.id} />
         </Suspense>
-        <label className="mt-4 block text-[14px] text-[var(--rk-muted)]">
-          <Trans>Model</Trans>
-          <select
-            value={modelKey}
-            onChange={(event) => {
-              setModelKey(event.target.value);
-              setThinkingLevel("");
-            }}
-            className="mt-2 w-full rounded-[11px] border border-[var(--rk-border)] bg-transparent px-3.5 py-3 text-[var(--rk-ink)]"
-          >
-            <option value="">
-              {t`Space default`}
-              {me?.defaultModel
-                ? ` (${catalogLabel(catalog, me.defaultProvider, me.defaultModel) ?? me.defaultModel})`
-                : ""}
-            </option>
-            {modelKey && !connectedOptions.some((option) => option.key === modelKey) ? (
-              <option value={modelKey}>{parseModelOptionKey(modelKey)?.modelId ?? modelKey}</option>
-            ) : null}
-            {connectedOptions.map((option) => (
-              <option key={option.key} value={option.key}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
         {thinkingOptions.length ? (
           <label className="mt-4 block text-[14px] text-[var(--rk-muted)]">
             <Trans>Thinking</Trans>

@@ -954,18 +954,28 @@ describeWithDatabase("API authorization and resource isolation", () => {
 
   it("validates per-bot model overrides against connected providers and catalog", async () => {
     const cookie = await signup(app, `bot-model-${stamp}@rakazo.test`, "Bot Model");
+    await rpc(app, cookie, "models/connect", {
+      provider: "xai",
+      apiKey: "fake-xai-key-not-real",
+      label: "xAI",
+      modelId: "grok-4.6",
+    });
     const bot = await rpc<
       Bot & {
         modelProvider: string | null;
         modelId: string | null;
         thinkingLevel: string | null;
       }
-    >(app, cookie, "bots/create", botInput("Model Bot"));
-    await rpc(app, cookie, "models/connect", {
-      provider: "xai",
-      apiKey: "fake-xai-key-not-real",
-      label: "xAI",
+    >(app, cookie, "bots/create", {
+      ...botInput("Model Bot"),
+      modelProvider: "xai",
       modelId: "grok-4.6",
+      thinkingLevel: "high",
+    });
+    expect(bot).toMatchObject({
+      modelProvider: "xai",
+      modelId: "grok-4.6",
+      thinkingLevel: "high",
     });
 
     const updated = await rpc<
@@ -1001,6 +1011,14 @@ describeWithDatabase("API authorization and resource isolation", () => {
     });
     expect(disconnected.status).toBeGreaterThanOrEqual(400);
     expect(await disconnected.text()).toMatch(/connect/i);
+
+    const unknownCreate = await raw(app, cookie, "bots/create", {
+      ...botInput("Unknown Model Bot"),
+      modelProvider: "xai",
+      modelId: "not-a-real-grok",
+    });
+    expect(unknownCreate.status).toBeGreaterThanOrEqual(400);
+    expect(await unknownCreate.text()).toMatch(/unknown model/i);
 
     const partialClear = await raw(app, cookie, "bots/update", {
       botId: bot.id,

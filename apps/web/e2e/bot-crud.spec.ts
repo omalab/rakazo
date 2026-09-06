@@ -1,10 +1,16 @@
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, openNewBot, signup } from "./helpers";
+import { captureScreenshot, completeOnboarding, openNewBot, rpc, signup } from "./helpers";
 
 test("bot creation, editing, and deletion persist", async ({ page }, testInfo) => {
   const stamp = Date.now();
   await signup(page, `bot-crud-${stamp}@rakazo.test`, "password12", "Bot CRUD");
   await completeOnboarding(page);
+  await rpc(page, "models/connect", {
+    provider: "scripted",
+    apiKey: "fake-scripted-key-not-real",
+    label: "Scripted",
+    modelId: "scripted",
+  });
   await page.goto("/app");
   await page.waitForURL(/\/app\/[^/]+$/);
 
@@ -21,6 +27,12 @@ test("bot creation, editing, and deletion persist", async ({ page }, testInfo) =
   await page
     .locator("label:has-text('Description') textarea")
     .fill("Finds reliable sources and turns them into concise briefs.");
+  const createModelSelect = page.getByTestId("create-bot-model");
+  await expect(createModelSelect).toBeVisible();
+  await expect(createModelSelect.locator("option")).not.toHaveCount(1);
+  const selectedModelKey = await createModelSelect.locator("option").nth(1).getAttribute("value");
+  expect(selectedModelKey).toBeTruthy();
+  await createModelSelect.selectOption(selectedModelKey!);
   await captureScreenshot(page, testInfo, "26-new-bot-form");
   await page.route("**/rpc/bots/create", async (route) => route.abort("failed"));
   await page.getByRole("button", { name: "Create", exact: true }).click();
@@ -73,15 +85,15 @@ test("bot creation, editing, and deletion persist", async ({ page }, testInfo) =
     "true",
   );
   await expect(teamComputer).toBeHidden();
-  await expect(modelSelect).toBeHidden();
+  await expect(modelSelect).toBeVisible();
+  await expect(modelSelect).toHaveValue(selectedModelKey!);
+  await expect(modelSelect).toContainText("Space default");
   await expect(openWork).toBeHidden();
   await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeVisible();
   await captureScreenshot(page, testInfo, "27a-agent-color-picker");
   await settings.getByText("Advanced", { exact: true }).click();
   await expect(teamComputer).toBeVisible();
   await expect(openWork).toBeVisible();
-  await expect(modelSelect).toBeVisible();
-  await expect(modelSelect).toContainText("Space default");
   await captureScreenshot(page, testInfo, "27a-bot-settings-model");
   await page.getByRole("button", { name: "Show computer" }).click();
   const sidePanel = page.getByTestId("side-panel");

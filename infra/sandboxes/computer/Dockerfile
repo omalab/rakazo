@@ -64,7 +64,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dbus-x11 \
     xdg-utils \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install --global --omit=dev @beads/bd@1.2.2 \
+  && npm install --global --omit=dev @beads/bd@1.2.2 @openai/codex@0.153.4 \
   && npm cache clean --force \
   && usermod --login rakazo --home /home/rakazo --move-home --shell /bin/bash node \
   && groupmod --new-name rakazo node \
@@ -93,6 +93,8 @@ RUN command -v node \
   && command -v bun \
   && command -v composio \
   && composio --version \
+  && command -v codex \
+  && codex --version \
   && command -v chromium \
   && command -v python3 \
   && command -v curl

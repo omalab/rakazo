@@ -192,6 +192,7 @@ describe("graphical computer spec", () => {
       "uv",
       "bun",
       "composio",
+      "codex",
       "chromium",
       "python3",
       "curl",
@@ -203,6 +204,8 @@ describe("graphical computer spec", () => {
     expect(dockerfile).toContain("COMPOSIO_CLI_VERSION=0.4.1");
     expect(dockerfile).toContain("/usr/local/bin/composio");
     expect(dockerfile).toContain("composio --version");
+    expect(dockerfile).toContain("@openai/codex@0.153.4");
+    expect(dockerfile).toContain("codex --version");
     expect(dockerfile).toContain("/etc/profile.d/rakazo-path.sh");
     expect(dockerfile).toContain("$HOME/.local/bin:$HOME/.bun/bin:$PATH");
     expect(COMPUTER_PATH).toContain("/home/rakazo/.local/bin");
