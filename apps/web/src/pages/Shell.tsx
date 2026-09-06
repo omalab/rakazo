@@ -119,6 +119,7 @@ import {
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
+import { BlockedRunNotice } from "../components/beautiful-ui/BlockedRunNotice";
 import {
   ActiveBotGlyph,
   CollaborationMarker,
@@ -1841,7 +1842,8 @@ export function ShellPage() {
     ["running", "queued", "leased"].includes(run.status),
   );
   const transcriptRunning = workingRuns.length > 0;
-  const composerRunning = currentRuns.some((run) => isActive(run.status));
+  const composerRunning = workingRuns.length > 0;
+  const takeoverBlocked = currentRuns.some((run) => run.status === "waiting_takeover");
   const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
   const displayedRunError = !sendError && !dictationError ? runError : null;
   const displayedRunErrorId = displayedRunError ? (activeSnapshot?.run?.id ?? null) : null;
@@ -3351,6 +3353,9 @@ export function ShellPage() {
           <div className="px-6 pb-2 text-center text-[13px] text-[var(--rk-danger)]">
             <Trans>Teaching in progress — stop teaching before sending a new message.</Trans>
           </div>
+        ) : null}
+        {!inExternalConversation && !inGroup && active && takeoverBlocked ? (
+          <BlockedRunNotice botName={active.name} onOpenComputer={() => void openComputer()} />
         ) : null}
         {inExternalConversation ? null : (
           <Composer

@@ -24,12 +24,20 @@ describe("BotAvatar", () => {
     expect(html).toContain(`stroke="url(#${gradMatches[1]})"`);
   });
 
-  it.each(["running", "queued", "leased", "waiting_input", "waiting_takeover"])(
+  it.each(["running", "queued", "leased"])(
     "renders active working ring for %s status",
     (status) => {
       const html = renderToString(<BotAvatar color="#3B82F6" status={status} />);
       expect(html).toContain("<svg");
       expect(html).toContain("rakazo-bot-avatar-ring");
+    },
+  );
+
+  it.each(["waiting_input", "waiting_takeover"])(
+    "does not present blocked %s status as active work",
+    (status) => {
+      const html = renderToString(<BotAvatar color="#3B82F6" status={status} />);
+      expect(html).toContain('data-working="false"');
     },
   );
 

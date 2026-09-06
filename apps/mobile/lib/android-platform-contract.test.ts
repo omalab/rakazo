@@ -183,6 +183,16 @@ describe("Android mobile platform contract", () => {
     );
   });
 
+  it("presents takeover as an intervention instead of active work", () => {
+    const thread = readFileSync(resolve(mobileRoot, "app/thread.tsx"), "utf8");
+    expect(thread).toContain('const takeoverBlocked = currentBotStatus === "waiting_takeover"');
+    expect(thread).toContain("needs you");
+    expect(thread).toContain("Open the computer to continue this task.");
+    expect(thread).not.toMatch(
+      /function isWorkingStatus[\s\S]*status === "waiting_takeover"[\s\S]*\n}/,
+    );
+  });
+
   it("shows agent notification silence in the menu, inbox avatar, and DM header only", () => {
     const index = readFileSync(resolve(mobileRoot, "app/index.tsx"), "utf8");
     const thread = readFileSync(resolve(mobileRoot, "app/thread.tsx"), "utf8");

@@ -731,6 +731,8 @@ export async function pauseRunForInput(
         status: "waiting_input",
         leaseOwner: null,
         leaseExpiresAt: null,
+        teamChatInputClaimedAt: null,
+        teamChatInputMirroredAt: null,
         ...(input.offeredActions?.length
           ? { checkpoint: choiceAskCheckpoint(input.offeredActions) }
           : {}),
@@ -805,6 +807,8 @@ export async function pauseRunForTakeover(
         leaseOwner: null,
         leaseExpiresAt: null,
         checkpoint: null,
+        teamChatInputClaimedAt: null,
+        teamChatInputMirroredAt: null,
       },
     });
     if (paused.count !== 1) return null;

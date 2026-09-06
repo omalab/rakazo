@@ -337,7 +337,13 @@ describe("pauseRunForInput", () => {
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ status: "running", leaseFence: 3 }),
-        data: { status: "waiting_input", leaseOwner: null, leaseExpiresAt: null },
+        data: {
+          status: "waiting_input",
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          teamChatInputClaimedAt: null,
+          teamChatInputMirroredAt: null,
+        },
       }),
     );
     expect(tx.event.create.mock.calls.map(([input]) => input.data.type)).toEqual([
@@ -418,6 +424,8 @@ describe("pauseRunForInput", () => {
           status: "waiting_input",
           leaseOwner: null,
           leaseExpiresAt: null,
+          teamChatInputClaimedAt: null,
+          teamChatInputMirroredAt: null,
           checkpoint: JSON.stringify({
             kind: "choice_ask_v1",
             actions: [
@@ -480,6 +488,8 @@ describe("pauseRunForTakeover", () => {
           leaseOwner: null,
           leaseExpiresAt: null,
           checkpoint: null,
+          teamChatInputClaimedAt: null,
+          teamChatInputMirroredAt: null,
         },
       }),
     );
