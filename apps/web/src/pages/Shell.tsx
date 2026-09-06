@@ -1842,7 +1842,7 @@ export function ShellPage() {
     ["running", "queued", "leased"].includes(run.status),
   );
   const transcriptRunning = workingRuns.length > 0;
-  const composerRunning = workingRuns.length > 0;
+  const composerRunning = currentRuns.some((run) => isActive(run.status));
   const takeoverBlocked = currentRuns.some((run) => run.status === "waiting_takeover");
   const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
   const displayedRunError = !sendError && !dictationError ? runError : null;
