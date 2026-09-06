@@ -73,6 +73,34 @@ describe("lingui catalogs", () => {
     }
   });
 
+  it("ships readable agent color controls in every catalog", () => {
+    for (const locale of ["en", "de", "hi", "ko", "pt-BR", "tr", "zh-CN"]) {
+      const catalog = readFileSync(
+        new URL(`../locales/${locale}/messages.po`, import.meta.url),
+        "utf8",
+      );
+
+      for (const message of [
+        "Agent color",
+        "Teal",
+        "Orange",
+        "Indigo",
+        "Purple",
+        "Blue",
+        "Coral",
+        "Pink",
+      ]) {
+        const entryStart = `msgid "${message}"\nmsgstr "`;
+        const entryIndex = catalog.indexOf(entryStart);
+        expect(entryIndex, `${locale}: ${message}`).toBeGreaterThanOrEqual(0);
+        expect(
+          catalog.slice(entryIndex + entryStart.length).split('"', 1)[0],
+          `${locale}: ${message}`,
+        ).not.toBe("");
+      }
+    }
+  });
+
   it("formats ICU cron-style messages with reordered placeholders", () => {
     i18n.load("de", {
       "every {intervalAmountSelect} {intervalUnitSelect}":

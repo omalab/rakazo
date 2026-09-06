@@ -3346,3 +3346,35 @@ msgstr "Send to"
 #: src/pages/RoutineEditor.tsx
 msgid "Rakazo"
 msgstr "Rakazo"
+
+#: src/pages/Shell.tsx
+msgid "Agent color"
+msgstr "Agent color"
+
+#: src/pages/Shell.tsx
+msgid "Teal"
+msgstr "Teal"
+
+#: src/pages/Shell.tsx
+msgid "Orange"
+msgstr "Orange"
+
+#: src/pages/Shell.tsx
+msgid "Indigo"
+msgstr "Indigo"
+
+#: src/pages/Shell.tsx
+msgid "Purple"
+msgstr "Purple"
+
+#: src/pages/Shell.tsx
+msgid "Blue"
+msgstr "Blue"
+
+#: src/pages/Shell.tsx
+msgid "Coral"
+msgstr "Coral"
+
+#: src/pages/Shell.tsx
+msgid "Pink"
+msgstr "Pink"
