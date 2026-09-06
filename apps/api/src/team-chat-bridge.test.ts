@@ -9,7 +9,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   TeamChatBridge,
   teamChatAmbientPrompt,
+  teamChatCanAnswer,
   teamChatPrompt,
+  teamChatQuestionText,
   teamChatResponseText,
 } from "./team-chat-bridge.js";
 
@@ -49,6 +51,24 @@ describe("team chat bridge", () => {
     ];
     expect(teamChatResponseText(blocks)).toBe("The plan is ready.");
     expect(teamChatResponseText([])).toBe("Arthur completed the request without a written reply.");
+  });
+
+  it("requires Rakazo for approvals whose external sender identity is not verified", () => {
+    const approval: Extract<MessageBlock, { kind: "ask" }> = {
+      kind: "ask",
+      text: "Review before sending the update",
+      approvalEffectId: "effect-1",
+      status: "pending",
+      actions: [
+        { id: "allow", label: "Allow once" },
+        { id: "always", label: "Always allow this tool" },
+      ],
+    };
+
+    expect(teamChatCanAnswer(approval)).toBe(false);
+    expect(teamChatQuestionText(approval)).toBe(
+      "Review before sending the update\n\nOpen Rakazo to approve or deny this action.",
+    );
   });
 
   it("creates one isolated run and one reply for duplicate provider events", async () => {
@@ -318,8 +338,8 @@ describe("team chat bridge", () => {
             ? { sourceMessageId: "message-parent-source" }
             : null,
         ),
-        updateMany: vi.fn(async () => {
-          mirrored = true;
+        updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          if (data.teamChatMirroredAt instanceof Date) mirrored = true;
           return { count: 1 };
         }),
       },
@@ -357,10 +377,106 @@ describe("team chat bridge", () => {
         content: "Research found that the launch should move.",
       },
     ]);
-    expect(prisma.run.updateMany).toHaveBeenCalledWith({
-      where: { id: "run-arthur-result", teamChatMirroredAt: null },
-      data: { teamChatMirroredAt: expect.any(Date) },
+    expect(prisma.run.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: "run-arthur-result",
+          teamChatMirroredAt: null,
+          teamChatInputClaimedAt: expect.any(Date),
+        }),
+        data: {
+          teamChatInputClaimedAt: null,
+          teamChatMirroredAt: expect.any(Date),
+        },
+      }),
+    );
+  });
+
+  it("delivers one scheduled update through Arthur when two bridges reconcile", async () => {
+    const provider = new FakeTeamChatProvider();
+    let mirrored = false;
+    let claimedAt: Date | null = null;
+    const routineRun = {
+      id: "run-routine",
+      status: "completed",
+      error: null,
+      bot: { name: "James Baker" },
+      routine: {
+        name: "Slack open-ask chase",
+        notificationExternalConversation: { conversationId: "D-OPERATIONS" },
+      },
+    };
+    const prisma = {
+      bot: {
+        findFirst: vi.fn(async () => ({
+          id: "bot-arthur",
+          spaceId: "space-1",
+          userId: "owner-1",
+          name: "Arthur",
+          modelProvider: null,
+          modelId: null,
+        })),
+      },
+      externalMessage: {
+        findMany: vi.fn(async () => []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      run: {
+        findMany: vi.fn(async ({ where }: { where: { trigger?: string } }) =>
+          where.trigger === "routine" && !mirrored ? [routineRun] : [],
+        ),
+        updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          if (data.teamChatInputClaimedAt instanceof Date) {
+            if (mirrored || claimedAt) return { count: 0 };
+            claimedAt = data.teamChatInputClaimedAt;
+            return { count: 1 };
+          }
+          if (data.teamChatMirroredAt instanceof Date) {
+            mirrored = true;
+            claimedAt = null;
+            return { count: 1 };
+          }
+          if (data.teamChatInputClaimedAt === null) {
+            claimedAt = null;
+            return { count: 1 };
+          }
+          return { count: 0 };
+        }),
+      },
+      message: {
+        findFirst: vi.fn(async () => ({
+          blocks: [{ kind: "text", text: "Two overdue asks need owners." }],
+        })),
+      },
+    } as unknown as PrismaClient;
+    const bridgeOne = new TeamChatBridge({
+      prisma,
+      events: { sendUserMessage: vi.fn() },
+      jobs: { enqueue: vi.fn() },
+      provider,
+      botId: "bot-arthur",
+      reconcileIntervalMs: 60_000,
     });
+    const bridgeTwo = new TeamChatBridge({
+      prisma,
+      events: { sendUserMessage: vi.fn() },
+      jobs: { enqueue: vi.fn() },
+      provider,
+      botId: "bot-arthur",
+      reconcileIntervalMs: 60_000,
+    });
+
+    await Promise.all([bridgeOne.start(), bridgeTwo.start()]);
+    await Promise.all([bridgeOne.stop(), bridgeTwo.stop()]);
+
+    expect(provider.sent).toEqual([
+      {
+        conversationId: "D-OPERATIONS",
+        replyThreadId: null,
+        content: "James Baker — Slack open-ask chase\n\nTwo overdue asks need owners.",
+      },
+    ]);
+    expect(mirrored).toBe(true);
   });
 
   it("keeps ambient channel traffic silent when channel listening is disabled", async () => {

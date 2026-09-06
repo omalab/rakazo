@@ -93,6 +93,8 @@ describe("addressing", () => {
     ];
 
     expect(resolveBotAddress(teammates, { name: "James Baker" })).toBeUndefined();
+    expect(resolveBotAddress(teammates, { name: "James" })).toBeUndefined();
+    expect(resolveBotAddress(teammates, { name: "JB" })).toBeUndefined();
   });
 
   it("refuses an ambiguous name rather than guessing", () => {

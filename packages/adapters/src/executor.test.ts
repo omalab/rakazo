@@ -6,6 +6,7 @@ import {
   createRunExecutor,
   loadCurrentTurnImages,
   missingTurnImagesInstruction,
+  runAllowsSilentCompletion,
   runNotificationsEnabled,
   selectBuiltinToolsForRun,
   settleSteeringAttachmentLoads,
@@ -276,6 +277,7 @@ describe("run notification preference", () => {
       select: {
         bot: { select: { notifyOnFinish: true } },
         thread: { select: { groupId: true } },
+        routine: { select: { notify: true } },
       },
     });
 
@@ -289,9 +291,36 @@ describe("run notification preference", () => {
       }),
     ).resolves.toBe(true);
   });
+
+  it("honors a routine's notification switch before the bot default", async () => {
+    const prisma = {
+      run: {
+        findFirst: vi.fn(async () => ({
+          bot: { notifyOnFinish: true },
+          thread: { groupId: null },
+          routine: { notify: false },
+        })),
+      },
+    } as unknown as PrismaClient;
+
+    await expect(
+      runNotificationsEnabled(prisma, {
+        id: "run-routine",
+        botId: "bot-1",
+        threadId: "thread-1",
+        spaceId: "workspace-1",
+        userId: "user-1",
+      }),
+    ).resolves.toBe(false);
+  });
 });
 
 describe("createRunExecutor", () => {
+  it("lets no-change routines finish silently without silencing user turns", () => {
+    expect(runAllowsSilentCompletion("routine", false, false)).toBe(true);
+    expect(runAllowsSilentCompletion("user", false, false)).toBe(false);
+  });
+
   it("isolates routine runs from every thread-history source", () => {
     const threadContext = {
       messages: [{ role: "user", content: "Create this routine" }],

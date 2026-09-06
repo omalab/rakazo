@@ -60,6 +60,105 @@ test("routine active switch keeps its thumb inside the track", async ({ page }, 
   await captureScreenshot(page, testInfo, "routine-toggle-mobile-inactive");
 });
 
+test("routine updates can be sent to a named Slack conversation", async ({ page }, testInfo) => {
+  const stamp = Date.now();
+  await signup(page, `routine-notify-${stamp}@rakazo.test`, "password12", "Routine Notify");
+  await completeOnboarding(page);
+  const botId = activeBotId(page);
+  const externalConversationId = "external-leadership";
+
+  await page.route("**/rpc/bootstrap", async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as {
+      json: {
+        me: { spaceId: string };
+        externalConversations: unknown[];
+      };
+    };
+    body.json.externalConversations = [
+      {
+        id: externalConversationId,
+        spaceId: body.json.me.spaceId,
+        botId,
+        provider: "slack",
+        displayName: "Leadership",
+        participantNames: ["Leadership"],
+        teamChatAmbientEnabled: null,
+        teamChatRules: null,
+        automatedSenderPolicies: {},
+        automatedSenders: [],
+        threadId: "external-thread-leadership",
+        preview: "",
+        unread: false,
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+    await route.fulfill({ response, json: body });
+  });
+  await page.reload();
+
+  await page.getByTitle("Agent computer").click();
+  await page.getByRole("button", { name: "Create Routine" }).click();
+
+  const notify = page.getByRole("switch", { name: "Notify when there is an update" });
+  const destination = page.getByRole("combobox", { name: "Send to" });
+  await expect(notify).toHaveAttribute("aria-checked", "true");
+  await expect(destination).toHaveValue("");
+  await expect(destination.getByRole("option", { name: "Rakazo" })).toHaveCount(1);
+  await expect(destination.getByRole("option", { name: "Slack · Leadership" })).toHaveCount(1);
+
+  await notify.click();
+  await expect(notify).toHaveAttribute("aria-checked", "false");
+  await expect(destination).toHaveCount(0);
+  await notify.click();
+  await page.getByRole("combobox", { name: "Send to" }).selectOption(externalConversationId);
+
+  await page.locator("label:has-text('Name') input").fill("Slack open-ask chase");
+  await page
+    .locator("label:has-text('Instruction') textarea")
+    .fill("Report only when an owner needs to respond.");
+  await addScheduleTrigger(page, "Every hour");
+  await captureScreenshot(page, testInfo, "routine-notification-destination");
+
+  let submitted: Record<string, unknown> | null = null;
+  await page.route("**/rpc/routines/create", async (route) => {
+    const body = (await route.request().postDataJSON()) as { json: Record<string, unknown> };
+    submitted = body.json;
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        json: {
+          id: "routine-slack-notify",
+          botId,
+          name: body.json.name,
+          prompt: body.json.prompt,
+          crons: body.json.crons,
+          timezone: body.json.timezone,
+          active: body.json.active,
+          notify: body.json.notify,
+          notificationExternalConversationId: body.json.notificationExternalConversationId,
+          notificationTarget: {
+            id: externalConversationId,
+            provider: "slack",
+            name: "Leadership",
+          },
+          webhookEnabled: body.json.webhookEnabled,
+          lastRunAt: null,
+          nextRunAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      },
+    });
+  });
+
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => submitted).not.toBeNull();
+  expect(submitted).toMatchObject({
+    notify: true,
+    notificationExternalConversationId: externalConversationId,
+  });
+});
+
 test("routine editing updates in place, preserves timezone, and deletion persists", async ({
   page,
 }, testInfo) => {
@@ -83,10 +182,23 @@ test("routine editing updates in place, preserves timezone, and deletion persist
   await page.getByTitle("Agent computer").click();
 
   await page.getByRole("button", { name: /Tokyo check-in/ }).click();
+  await expect(
+    page.getByRole("switch", { name: "Notify when there is an update" }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("combobox", { name: "Send to" })).toHaveValue("");
   await page.locator("label:has-text('Name') input").fill("Weekday check-in");
   await page.locator("label:has-text('Instruction') textarea").fill("Send the revised update");
   await page.getByLabel("How often").selectOption("Weekdays");
+  const updateRequest = page.waitForRequest((request) =>
+    request.url().includes("/rpc/routines/update"),
+  );
   await saveAndReturn(page, "routines/update");
+  expect(
+    ((await updateRequest).postDataJSON() as { json: Record<string, unknown> }).json,
+  ).toMatchObject({
+    notify: true,
+    notificationExternalConversationId: null,
+  });
 
   const updatedButton = page.getByRole("button", { name: /Weekday check-in/ });
   await expect(updatedButton).toHaveCount(1);
@@ -99,6 +211,8 @@ test("routine editing updates in place, preserves timezone, and deletion persist
     prompt: "Send the revised update",
     crons: ["0 9 * * 1-5"],
     timezone: "Asia/Tokyo",
+    notify: true,
+    notificationExternalConversationId: null,
   });
   expect(updated?.nextRunAt).not.toBeNull();
   expect(["Mon", "Tue", "Wed", "Thu", "Fri"]).toContain(

@@ -617,6 +617,7 @@ model ExternalConversation {
   userId           String
   thread           Thread?
   messages         ExternalMessage[]
+  notificationRoutines Routine[]      @relation("RoutineNotificationConversation")
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -711,6 +712,8 @@ model Routine {
   timezone       String    @default("UTC")
   active         Boolean   @default(false)
   notify         Boolean   @default(true)
+  notificationExternalConversationId String?
+  notificationExternalConversation   ExternalConversation? @relation("RoutineNotificationConversation", fields: [notificationExternalConversationId], references: [id], onDelete: SetNull)
   webhookEnabled Boolean   @default(false)
   lastRunAt      DateTime?
   nextRunAt      DateTime?
@@ -720,6 +723,7 @@ model Routine {
 
   @@index([active, nextRunAt])
   @@index([spaceId, botId])
+  @@index([notificationExternalConversationId])
   @@map("routines")
 }
 

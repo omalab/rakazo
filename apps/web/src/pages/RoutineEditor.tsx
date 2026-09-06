@@ -1,6 +1,6 @@
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { Routine } from "@rakazo/contracts";
+import type { ExternalConversation, Routine } from "@rakazo/contracts";
 import {
   type CronFreq,
   type CronPreset,
@@ -12,6 +12,7 @@ import {
 } from "@rakazo/core";
 import { ChevronLeft, ChevronRight, Pause, Plus, X } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import { providerLabel } from "../lib/messaging";
 import { RoutineSchedule } from "./RoutineSchedule";
 
 function toDatetimeLocalValue(date: Date): string {
@@ -55,6 +56,8 @@ export type RoutineDraftState = {
   schedules: CronPreset[];
   webhookEnabled: boolean;
   active: boolean;
+  notify: boolean;
+  notificationExternalConversationId: string | null;
   runAtLocal: string;
 };
 
@@ -65,6 +68,8 @@ export function emptyRoutineDraft(): RoutineDraftState {
     schedules: [],
     webhookEnabled: false,
     active: true,
+    notify: true,
+    notificationExternalConversationId: null,
     runAtLocal: "",
   };
 }
@@ -76,8 +81,21 @@ export function draftFromRoutine(routine: Routine): RoutineDraftState {
     schedules: routine.crons.map(presetFromCron),
     webhookEnabled: routine.webhookEnabled,
     active: routine.active,
+    notify: routine.notify,
+    notificationExternalConversationId: routine.notificationExternalConversationId,
     runAtLocal: routineNeedsOneShotArm(routine, routine.crons) ? defaultArmRunAtLocal() : "",
   };
+}
+
+function notificationDestinationLabel(conversation: ExternalConversation): string {
+  const name =
+    conversation.displayName?.trim() ||
+    conversation.participantNames
+      .map((participant) => participant.trim())
+      .filter(Boolean)
+      .join(", ") ||
+    t`Conversation`;
+  return `${providerLabel(conversation.provider)} · ${name}`;
 }
 
 export function routineTriggerSummary(routine: Routine): string {
@@ -165,6 +183,7 @@ export function RoutineEditor({
   draft,
   onChange,
   editing,
+  notificationDestinations,
   timezone,
   webhook,
   saving,
@@ -180,6 +199,7 @@ export function RoutineEditor({
   draft: RoutineDraftState;
   onChange: (next: RoutineDraftState) => void;
   editing: Routine | null;
+  notificationDestinations: ExternalConversation[];
   timezone: string;
   webhook: { path: string; secret: string | null; configured: boolean };
   saving: boolean;
@@ -325,6 +345,50 @@ export function RoutineEditor({
           className="mt-2 w-full rounded-[11px] border border-[var(--rk-border)] bg-transparent px-3.5 py-3 text-[var(--rk-ink)] placeholder:text-[#5C5C62]"
         />
       </label>
+
+      <div className="mt-5 space-y-3">
+        <label className="flex items-center gap-2.5 text-[14px] text-[var(--rk-soft)]">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={draft.notify}
+            onClick={() => onChange({ ...draft, notify: !draft.notify })}
+            className={`relative h-[22px] w-[40px] rounded-full transition-colors ${
+              draft.notify ? "bg-[#3B82F6]" : "bg-[var(--rk-scroll)]"
+            }`}
+          >
+            <span
+              className={`absolute top-[2px] left-0 h-[18px] w-[18px] rounded-full bg-white transition-transform ${
+                draft.notify ? "translate-x-[20px]" : "translate-x-[2px]"
+              }`}
+            />
+          </button>
+          <Trans>Notify when there is an update</Trans>
+        </label>
+
+        {draft.notify ? (
+          <label className="block text-[14px] text-[var(--rk-muted)]">
+            <Trans>Send to</Trans>
+            <select
+              value={draft.notificationExternalConversationId ?? ""}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  notificationExternalConversationId: event.target.value || null,
+                })
+              }
+              className="mt-2 w-full rounded-[11px] border border-[var(--rk-border)] bg-[var(--rk-surface)] px-3.5 py-3 text-[var(--rk-ink)]"
+            >
+              <option value="">{t`Rakazo`}</option>
+              {notificationDestinations.map((conversation) => (
+                <option key={conversation.id} value={conversation.id}>
+                  {notificationDestinationLabel(conversation)}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
 
       <div className="mt-5 text-[14px] text-[var(--rk-muted)]">
         <div className="flex items-baseline gap-2">

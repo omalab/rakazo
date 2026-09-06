@@ -6,6 +6,11 @@ const fakeAgentState = vi.hoisted(() => ({
   abortCount: 0,
   tools: [] as Array<{
     name: string;
+    parameters?: {
+      type?: string;
+      properties?: Record<string, Record<string, unknown>>;
+      required?: string[];
+    };
     prepareArguments?: (args: unknown) => Record<string, unknown>;
     execute: (toolCallId: string, params: Record<string, unknown>) => Promise<unknown>;
   }>,
@@ -196,6 +201,45 @@ describe("Pi connector tool dispatch", () => {
       args: { collection: "notes", title: "Result", body: "Done" },
     };
     delete process.env.MAX_TOOL_CALLS_PER_TURN;
+  });
+
+  it("exposes the required bounded-worker budgets to the manager model", async () => {
+    fakeAgentState.mode = "empty";
+    const runtime = new PiAgentRuntime();
+
+    for await (const _event of runtime.run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "bounded-worker-schema",
+        prompt: "delegate a bounded task",
+        instructions: "Use run_subagent.",
+        history: [],
+        tools: [
+          {
+            name: "run_subagent",
+            description: "Delegate bounded tactical work",
+            inputSchema: { type: "object", properties: {} },
+          },
+        ],
+        model: { provider: "test", id: "dispatch-test-model" },
+      },
+      { signal: new AbortController().signal },
+    )) {
+      // Exhaust the runtime event stream so its model-facing schema is available.
+    }
+
+    const delegation = fakeAgentState.tools.find((tool) => tool.name === "run_subagent");
+    expect(delegation?.parameters).toMatchObject({
+      type: "object",
+      properties: {
+        max_tool_calls: { type: "integer", minimum: 1, maximum: 40 },
+        max_duration_seconds: { type: "integer", minimum: 5, maximum: 600 },
+      },
+    });
+    expect(delegation?.parameters?.required).toEqual(
+      expect.arrayContaining(["name", "task", "max_tool_calls", "max_duration_seconds"]),
+    );
   });
 
   it("injects durable steering at Pi's next safe turn boundary", async () => {

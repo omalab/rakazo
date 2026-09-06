@@ -428,6 +428,7 @@ export const appContract = {
             timezone: z.string().optional(),
             active: z.boolean().optional(),
             notify: z.boolean().optional(),
+            notificationExternalConversationId: Id.nullable().optional(),
             webhookEnabled: z.boolean().optional(),
             /** ISO datetime to arm a never-run one-shot. */
             runAt: IsoDate.optional(),

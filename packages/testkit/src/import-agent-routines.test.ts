@@ -38,6 +38,7 @@ function validManifest() {
         crons: ["0 8 * * *", "0 18 * * *"],
         timezone: "America/New_York",
         active: true,
+        notificationExternalConversationId: "arthur-slack-conversation-id",
       },
     ],
   };
@@ -143,6 +144,23 @@ describe("routine resolution", () => {
 
     expect(routine.active).toBe(false);
     expect(routine.nextRunAt).toBeNull();
+    expect(routine.notificationExternalConversationId).toBeNull();
+  });
+
+  it("keeps an explicit Arthur conversation destination", () => {
+    expect(
+      resolveRoutine(
+        {
+          sourceRoutineId: "source-routine-id",
+          destinationRoutineId: "destination-routine-id",
+          name: "Morning review",
+          prompt: "Review the day.",
+          crons: ["0 8 * * *"],
+          notificationExternalConversationId: "arthur-slack-conversation-id",
+        },
+        false,
+      ).notificationExternalConversationId,
+    ).toBe("arthur-slack-conversation-id");
   });
 
   it("computes the next run only when active staging is allowed", () => {
@@ -192,6 +210,7 @@ describe("Arthur-only routine import", () => {
       timezone: "UTC",
       active: true,
       notify: true,
+      notificationExternalConversationId: null,
       webhookEnabled: false,
       nextRunAt: new Date("2026-09-06T01:00:00.000Z"),
     };
@@ -206,6 +225,9 @@ describe("Arthur-only routine import", () => {
         }),
       },
       agentSkill: { findFirst: async () => null },
+      externalConversation: {
+        findFirst: async () => ({ id: "arthur-slack-conversation-id" }),
+      },
       routine: {
         findUnique: async ({ where }: { where: { id: string } }) =>
           routines.find((routine) => routine.id === where.id) ?? null,
@@ -244,6 +266,7 @@ describe("Arthur-only routine import", () => {
       id: "destination-routine-id",
       botId: "destination-james-id",
       active: false,
+      notificationExternalConversationId: "arthur-slack-conversation-id",
     });
     expect(second.plan.routines[0]?.rollback).toEqual({
       action: "restore-existing",
@@ -263,6 +286,9 @@ describe("Arthur-only routine import", () => {
         }),
       },
       agentSkill: { findFirst: async () => null },
+      externalConversation: {
+        findFirst: async () => ({ id: "arthur-slack-conversation-id" }),
+      },
       routine: {
         findUnique: async () => ({
           id: "destination-routine-id",
@@ -285,6 +311,27 @@ describe("Arthur-only routine import", () => {
     await expect(
       buildImportPlan(prisma as never, manifest, { allowActive: false }),
     ).rejects.toThrow(/belongs to another bot/);
+  });
+
+  it("rejects a notification destination outside the destination space", async () => {
+    const prisma = {
+      bot: {
+        findUnique: async () => ({
+          id: "destination-james-id",
+          name: "James Baker",
+          spaceId: "audienti-space-id",
+          userId: "owner-user-id",
+        }),
+      },
+      agentSkill: { findFirst: async () => null },
+      externalConversation: { findFirst: async () => null },
+      routine: { findUnique: async () => null },
+    };
+    const manifest = readManifest(writeManifest(validManifest()), NOW);
+
+    await expect(
+      buildImportPlan(prisma as never, manifest, { allowActive: false }),
+    ).rejects.toThrow(/notification destination .* was not found/i);
   });
 });
 

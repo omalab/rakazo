@@ -66,6 +66,9 @@ vi.mock("@earendil-works/pi-ai/providers/all", () => ({
       if (modelId === "worker-model") {
         return { provider: "worker-provider", id: modelId, reasoning: false };
       }
+      if (modelId === "codex-worker") {
+        return { provider: "openai-codex", id: modelId, reasoning: false };
+      }
       if (modelId === "grok-4.6") {
         return {
           provider: "xai",
@@ -182,6 +185,53 @@ describe("Pi agent thinking level", () => {
       expect.objectContaining({ provider: "worker-provider", id: "worker-model" }),
     ]);
     expect(fakeAgentState.thinkingLevels).toEqual(["high", "off"]);
+  });
+
+  it("runs one explicitly bounded Codex worker and returns its terminal result", async () => {
+    const runtime = new PiAgentRuntime();
+    const events: unknown[] = [];
+
+    for await (const event of runtime.run(
+      {
+        botId: "james",
+        threadId: "cos-thread",
+        runId: "bounded-codex-worker",
+        prompt: "Delegate the evidence collection.",
+        instructions: "Manage the task and verify the worker result.",
+        history: [{ role: "user", content: "Unrelated manager transcript." }],
+        tools: [],
+        model: { provider: "test", id: "reasoning-model", thinkingLevel: "high" },
+        workerModel: {
+          provider: "openai-codex",
+          id: "codex-worker",
+          thinkingLevel: "low",
+        },
+      },
+      { signal: new AbortController().signal },
+    )) {
+      events.push(event);
+    }
+
+    expect(fakeAgentState.models).toEqual([
+      expect.objectContaining({ provider: "test", id: "reasoning-model" }),
+      expect.objectContaining({ provider: "openai-codex", id: "codex-worker" }),
+    ]);
+    expect(fakeAgentState.promptInputs).toEqual(["Delegate the evidence collection.", "help"]);
+    expect(fakeAgentState.systemPrompts[1]).toContain(
+      "This assignment is limited to 6 tool calls and 30 seconds.",
+    );
+    expect(fakeAgentState.systemPrompts[1]).toContain(
+      "Use only the supplied task and instructions as context.",
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "subagent",
+        name: "helper",
+        task: "help",
+        status: "completed",
+        result: "done.",
+      }),
+    );
   });
 
   it("keeps reasoning off for the main agent and subagent", async () => {

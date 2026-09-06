@@ -2032,7 +2032,14 @@ export function createRouter(deps: RouterDeps) {
             message: "One-shot schedules must be created from chat.",
           });
         }
-        const bot = await repos.getBot(context.actor, input.botId);
+        const [bot, notificationTarget] = await Promise.all([
+          repos.getBot(context.actor, input.botId),
+          findRoutineNotificationTarget(
+            deps,
+            context.actor,
+            input.notificationExternalConversationId,
+          ),
+        ]);
         // Validate every recurring cron even when inactive; @once and webhook-only have no next date.
         let nextRunAt: Date | null = null;
         if (input.crons.length > 0 && !isOneShotRoutineCrons(input.crons)) {
@@ -2049,9 +2056,13 @@ export function createRouter(deps: RouterDeps) {
             crons: input.crons,
             timezone: input.timezone,
             notify: input.notify,
+            notificationExternalConversationId: notificationTarget?.id ?? null,
             active: input.active,
             webhookEnabled: input.webhookEnabled,
             nextRunAt,
+          },
+          include: {
+            notificationExternalConversation: { select: routineNotificationTargetSelect },
           },
         });
         if (bot.thread) {
@@ -2073,7 +2084,6 @@ export function createRouter(deps: RouterDeps) {
           where: {
             id: input.routineId,
             spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
           },
         });
         if (!existing) throw new IsolationError();
@@ -2081,6 +2091,14 @@ export function createRouter(deps: RouterDeps) {
         const crons = input.crons ?? existing.crons;
         const timezone = input.timezone ?? existing.timezone;
         const webhookEnabled = input.webhookEnabled ?? existing.webhookEnabled;
+        const notificationTarget =
+          input.notificationExternalConversationId === undefined
+            ? undefined
+            : await findRoutineNotificationTarget(
+                deps,
+                context.actor,
+                input.notificationExternalConversationId,
+              );
         if (crons.length === 0 && !webhookEnabled) {
           throw new ORPCError("BAD_REQUEST", {
             message: "Add a schedule or webhook trigger",
@@ -2149,8 +2167,15 @@ export function createRouter(deps: RouterDeps) {
             timezone: input.timezone,
             active: input.active,
             notify: input.notify,
+            notificationExternalConversationId:
+              input.notificationExternalConversationId === undefined
+                ? undefined
+                : (notificationTarget?.id ?? null),
             webhookEnabled: input.webhookEnabled,
             nextRunAt,
+          },
+          include: {
+            notificationExternalConversation: { select: routineNotificationTargetSelect },
           },
         });
         const bot = await repos.getBot(context.actor, row.botId);
@@ -2190,7 +2215,6 @@ export function createRouter(deps: RouterDeps) {
           where: {
             id: input.routineId,
             spaceId: context.actor.spaceId,
-            userId: context.actor.userId,
           },
         });
         if (!routine) throw new IsolationError();
@@ -2205,7 +2229,10 @@ export function createRouter(deps: RouterDeps) {
           });
           if (existing) return { runId: existing.id };
         }
-        const skillRecords = await agentSkills.listWithContent(context.actor);
+        const skillRecords = await agentSkills.listWithContent({
+          ...context.actor,
+          userId: routine.userId,
+        });
         const prompt = expandSkillReferencesInPrompt(routine.prompt, skillRecords);
         let run: { id: string };
         try {
@@ -2234,7 +2261,7 @@ export function createRouter(deps: RouterDeps) {
                 botId: bot.id,
                 threadId,
                 taskId: task.id,
-                userId: context.actor.userId,
+                userId: routine.userId,
                 status: "queued",
                 trigger: "routine",
                 routineId: routine.id,
@@ -4249,6 +4276,13 @@ function mapRoutine(row: {
   timezone: string;
   active: boolean;
   notify: boolean;
+  notificationExternalConversationId: string | null;
+  notificationExternalConversation?: {
+    id: string;
+    provider: string;
+    displayName: string | null;
+    participantNames: string[];
+  } | null;
   webhookEnabled: boolean;
   lastRunAt: Date | null;
   nextRunAt: Date | null;
@@ -4263,6 +4297,14 @@ function mapRoutine(row: {
     timezone: row.timezone,
     active: row.active,
     notify: row.notify,
+    notificationExternalConversationId: row.notificationExternalConversationId,
+    notificationTarget: row.notificationExternalConversation
+      ? {
+          id: row.notificationExternalConversation.id,
+          provider: row.notificationExternalConversation.provider,
+          name: routineNotificationTargetName(row.notificationExternalConversation),
+        }
+      : null,
     webhookEnabled: row.webhookEnabled,
     lastRunAt: row.lastRunAt?.toISOString() ?? null,
     nextRunAt: row.nextRunAt?.toISOString() ?? null,
@@ -4273,8 +4315,49 @@ function mapRoutine(row: {
 async function listRoutinesDto(deps: RouterDeps, actor: Actor, botId: string) {
   const rows = await deps.prisma.routine.findMany({
     where: { botId, spaceId: actor.spaceId },
+    include: { notificationExternalConversation: { select: routineNotificationTargetSelect } },
   });
   return rows.map(mapRoutine);
+}
+
+const routineNotificationTargetSelect = {
+  id: true,
+  provider: true,
+  displayName: true,
+  participantNames: true,
+} as const;
+
+async function findRoutineNotificationTarget(
+  deps: RouterDeps,
+  actor: Actor,
+  externalConversationId: string | null,
+) {
+  if (!externalConversationId) return null;
+  const target = await deps.prisma.externalConversation.findFirst({
+    where: {
+      id: externalConversationId,
+      spaceId: actor.spaceId,
+      bot: { archivedAt: null },
+    },
+    select: routineNotificationTargetSelect,
+  });
+  if (!target) throw new IsolationError();
+  return target;
+}
+
+function routineNotificationTargetName(target: {
+  provider: string;
+  displayName: string | null;
+  participantNames: string[];
+}) {
+  const displayName = target.displayName?.trim();
+  if (displayName) return displayName;
+  const participants = target.participantNames
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .join(", ");
+  if (participants) return participants;
+  return `${target.provider.charAt(0).toUpperCase()}${target.provider.slice(1)} conversation`;
 }
 
 function withViewOnly(url: string, viewOnly: boolean) {

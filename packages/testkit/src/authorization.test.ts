@@ -560,6 +560,22 @@ describeWithDatabase("API authorization and resource isolation", () => {
     });
     expect(sharedGroupSend).toEqual(expect.objectContaining({ runIds: expect.any(Array) }));
 
+    const ownerRoutine = await rpc<{ id: string }>(
+      app,
+      owner,
+      "routines/create",
+      routineInput(ownerBot.id),
+    );
+    await expect(
+      rpc<{ id: string; name: string }>(app, member, "routines/update", {
+        routineId: ownerRoutine.id,
+        name: "Shared Routine",
+      }),
+    ).resolves.toMatchObject({ id: ownerRoutine.id, name: "Shared Routine" });
+    const sharedRoutineRun = await rpc<{ runId: string }>(app, member, "routines/testRun", {
+      routineId: ownerRoutine.id,
+    });
+
     const sharedRuns = await handles.prisma.run.findMany({
       where: { id: { in: [sharedBotSend.runId, ...sharedGroupSend.runIds] } },
       include: { task: { select: { userId: true } } },
@@ -582,6 +598,15 @@ describeWithDatabase("API authorization and resource isolation", () => {
     expect(sharedRuns.map((run) => run.userId).sort()).toEqual(
       [ownerActor.userId, ownerActor.userId, memberActor.userId].sort(),
     );
+    await expect(
+      handles.prisma.run.findUniqueOrThrow({
+        where: { id: sharedRoutineRun.runId },
+        include: { task: { select: { userId: true } } },
+      }),
+    ).resolves.toMatchObject({
+      userId: ownerActor.userId,
+      task: { userId: memberActor.userId },
+    });
     await expect(
       rpc<{ contentBase64: string }>(app, member, "artifacts/get", {
         botId: ownerBot.id,

@@ -1080,6 +1080,11 @@ function builtinParameters(tool: ConnectorTool) {
       name: Type.String(),
       task: Type.String(),
       instructions: Type.Optional(Type.String()),
+      max_tool_calls: Type.Integer({ minimum: 1, maximum: MAX_WORKER_TOOL_CALLS }),
+      max_duration_seconds: Type.Integer({
+        minimum: 5,
+        maximum: MAX_WORKER_DURATION_MS / 1_000,
+      }),
     });
   }
   if (tool.name === "spawn_bot") {
