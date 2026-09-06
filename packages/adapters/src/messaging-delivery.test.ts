@@ -1,5 +1,4 @@
 import type { AdapterContext, MessagingSurface } from "@rakazo/adapter-kit";
-import { BOT_MESSAGE_MAX_HOPS } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -807,19 +806,18 @@ describe("deliverMessagingOutbound channel runs", () => {
     );
   });
 
-  it("does not wake anyone when the hop budget is exhausted", async () => {
+  it("keeps waking an explicitly mentioned peer past the former hop budget", async () => {
     const deps = createChannelDeps({
       text: "@Helper again?",
-      sourceHop: BOT_MESSAGE_MAX_HOPS,
+      sourceHop: 20,
     });
     await deliverMessagingOutbound(deps, { runId: "run-1" }, context);
 
-    expect(deps.sendUserMessage).not.toHaveBeenCalled();
-    expect(deps.enqueue).not.toHaveBeenCalled();
-    // still delivered as context, with the clamped hop recorded
-    expect(deps.contextMessages[0]).toEqual(
-      expect.objectContaining({ clientNonce: "messaging-peer:m-1:bot-2" }),
+    expect(deps.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ botId: "bot-2", clientNonce: "messaging-peer:m-1:bot-2" }),
     );
+    expect(deps.enqueue).toHaveBeenCalledOnce();
+    expect(deps.contextMessages).toHaveLength(0);
   });
 });
 

@@ -1,7 +1,7 @@
 import type { JobPublisher, TeamChatInboundMessage, TeamChatProvider } from "@rakazo/adapter-kit";
 import { runContinueJob } from "@rakazo/adapter-kit";
 import { AutomatedSenderPoliciesSchema, type MessageBlock } from "@rakazo/contracts";
-import { BOT_MESSAGE_MAX_HOPS, botMessageContext } from "@rakazo/core";
+import { botMessageContext } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import type { TeamChatEngagementJudge } from "./team-chat-judge.js";
 
@@ -317,6 +317,7 @@ export class TeamChatBridge {
       }
     }
     await this.deliverPendingInputs(target);
+    await this.deliverPendingTakeovers(target);
     await this.deliverDelegatedReplies(target);
   }
 
@@ -362,6 +363,53 @@ export class TeamChatBridge {
       } catch (error) {
         await this.deps.prisma.run.updateMany({
           where: { id: run.id, status: "waiting_input", teamChatInputClaimedAt: claimedAt },
+          data: { teamChatInputClaimedAt: null },
+        });
+        throw error;
+      }
+    }
+  }
+
+  private async deliverPendingTakeovers(target: TargetBot): Promise<void> {
+    const staleClaim = new Date(Date.now() - INPUT_DELIVERY_RESERVATION_MS);
+    const runs = await this.deps.prisma.run.findMany({
+      where: {
+        spaceId: target.spaceId,
+        status: "waiting_takeover",
+        teamChatInputMirroredAt: null,
+        OR: [{ teamChatInputClaimedAt: null }, { teamChatInputClaimedAt: { lte: staleClaim } }],
+      },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+      take: BATCH_SIZE,
+      select: { id: true, bot: { select: { name: true } } },
+    });
+    for (const run of runs) {
+      const origin = await this.findExternalOriginForRun(run.id);
+      if (!origin) continue;
+      const claimedAt = new Date();
+      const claimed = await this.deps.prisma.run.updateMany({
+        where: {
+          id: run.id,
+          status: "waiting_takeover",
+          teamChatInputMirroredAt: null,
+          OR: [{ teamChatInputClaimedAt: null }, { teamChatInputClaimedAt: { lte: staleClaim } }],
+        },
+        data: { teamChatInputClaimedAt: claimedAt },
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        await this.deps.provider.send({
+          conversationId: origin.externalConversation.conversationId,
+          replyThreadId: origin.replyThreadId,
+          content: `${run.bot.name} needs you to take over the computer. Open Rakazo to continue.`,
+        });
+        await this.deps.prisma.run.updateMany({
+          where: { id: run.id, status: "waiting_takeover", teamChatInputClaimedAt: claimedAt },
+          data: { teamChatInputClaimedAt: null, teamChatInputMirroredAt: new Date() },
+        });
+      } catch (error) {
+        await this.deps.prisma.run.updateMany({
+          where: { id: run.id, status: "waiting_takeover", teamChatInputClaimedAt: claimedAt },
           data: { teamChatInputClaimedAt: null },
         });
         throw error;
@@ -424,7 +472,7 @@ export class TeamChatBridge {
   private async findExternalOrigin(sourceMessageId: string | null) {
     let currentSourceMessageId: string | null = sourceMessageId;
     const visitedRunIds = new Set<string>();
-    for (let depth = 0; currentSourceMessageId && depth <= BOT_MESSAGE_MAX_HOPS; depth += 1) {
+    while (currentSourceMessageId) {
       const source = await this.deps.prisma.message.findUnique({
         where: { id: currentSourceMessageId },
         select: { blocks: true, replyTo: { select: { runId: true } } },

@@ -3,8 +3,6 @@ import type { BotMessageIntent, MessageBlock } from "@rakazo/contracts";
 import {
   BOT_MESSAGE_MAX_LENGTH,
   botMessageContext,
-  botMessageHopExhausted,
-  botMessageHopLimitError,
   buildBotMessageWakePrompt,
   clampBotMessage,
   nextBotMessageHop,
@@ -116,20 +114,6 @@ export async function messageBot(
   if (target.id === sender.id) return { ok: false as const, error: "a bot cannot message itself" };
   if (!target.thread)
     return { ok: false as const, error: `${target.name} has no chat to deliver to` };
-  const returnsToSender =
-    options?.allowTerminalSource === true &&
-    (intent === "result" || intent === "status") &&
-    (sourceContext?.intent === undefined ||
-      sourceContext.intent === "request" ||
-      sourceContext.intent === "question") &&
-    sourceContext?.fromBotId === target.id;
-  if (botMessageHopExhausted(hop) && !returnsToSender) {
-    return {
-      ok: false as const,
-      error: botMessageHopLimitError(),
-    };
-  }
-
   const repliesToRequester = sourceContext?.fromBotId === target.id && intent !== "fyi";
   const targetThreadId =
     repliesToRequester && sourceContext.returnToThreadId

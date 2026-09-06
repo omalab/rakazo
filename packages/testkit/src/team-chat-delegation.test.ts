@@ -7,7 +7,13 @@ import type {
   TeamChatSendRequest,
 } from "@rakazo/adapter-kit";
 import { messageBot, returnBotMessageOutcome } from "@rakazo/adapters";
-import { createDb, createThreadEvents, createThreadMessage, pauseRunForInput } from "@rakazo/db";
+import {
+  createDb,
+  createThreadEvents,
+  createThreadMessage,
+  pauseRunForInput,
+  pauseRunForTakeover,
+} from "@rakazo/db";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { TeamChatBridge } from "../../../apps/api/src/team-chat-bridge.js";
 import { sessionCookieHeader } from "./index.js";
@@ -175,6 +181,47 @@ describeWithDatabase("Slack to Arthur to James delegation", () => {
       answerRunId: jamesRun.id,
     });
     expect(await prisma.externalMessage.count({ where: { providerEventId: "Ev-answer" } })).toBe(1);
+  });
+
+  it("tells the original Slack thread when James needs computer takeover", async () => {
+    const { jamesRun } = await handoff(
+      "Ev-takeover",
+      "400.4",
+      "Check the private dashboard",
+      "James Baker",
+    );
+    await prisma.run.update({
+      where: { id: jamesRun.id },
+      data: { status: "running", leaseOwner: "test-worker", leaseFence: 1 },
+    });
+    const attempt = await prisma.attempt.create({
+      data: { runId: jamesRun.id, fence: 1, status: "running" },
+    });
+    expect(
+      await pauseRunForTakeover(prisma, {
+        spaceId: jamesRun.spaceId,
+        threadId: jamesRun.threadId,
+        botId: james.id,
+        runId: jamesRun.id,
+        attemptId: attempt.id,
+        leaseOwner: "test-worker",
+        leaseFence: 1,
+        reason: "Sign in to continue",
+      }),
+    ).toBe(true);
+
+    const sentBefore = provider.sent.length;
+    await bridge.reconcileOnce();
+    expect(provider.sent.slice(sentBefore)).toEqual([
+      {
+        conversationId: "C-1",
+        replyThreadId: "400.4",
+        content: "James Baker needs you to take over the computer. Open Rakazo to continue.",
+      },
+    ]);
+
+    await bridge.reconcileOnce();
+    expect(provider.sent).toHaveLength(sentBefore + 1);
   });
 
   async function dispatch(

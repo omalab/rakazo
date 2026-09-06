@@ -1,4 +1,3 @@
-import { BOT_MESSAGE_MAX_HOPS } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -196,7 +195,7 @@ describe("messaging another bot", () => {
     expect(harness.enqueue).not.toHaveBeenCalled();
   });
 
-  it("stops a chain that has volleyed too many times", async () => {
+  it("continues a requested collaboration without an arbitrary hop stop", async () => {
     const harness = deps({
       hopBlocks: [
         {
@@ -204,7 +203,7 @@ describe("messaging another bot", () => {
           fromBotId: "b",
           fromBotName: "B",
           text: "hi",
-          hop: BOT_MESSAGE_MAX_HOPS,
+          hop: 20,
         },
       ],
     });
@@ -214,15 +213,11 @@ describe("messaging another bot", () => {
       sender,
       { bot_id: "bot-target", message: "again" },
     );
-    expect(sent).toEqual({
-      ok: false,
-      error:
-        "The 20-hop agent collaboration limit has been reached. Ask the user whether to continue for up to 20 more hops. Continue only if the user explicitly agrees; that user message starts a new chain.",
-    });
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(sent).toMatchObject({ ok: true, botId: "bot-target", name: "Analyst" });
+    expect(harness.tx.run.create).toHaveBeenCalledOnce();
   });
 
-  it("allows a final result back through after the request hop limit", async () => {
+  it("allows a final result back through after a long request chain", async () => {
     const harness = deps({
       hopBlocks: [
         {
@@ -230,7 +225,7 @@ describe("messaging another bot", () => {
           fromBotId: "bot-target",
           fromBotName: "Analyst",
           text: "please finish",
-          hop: BOT_MESSAGE_MAX_HOPS,
+          hop: 20,
           intent: "request",
           returnToMessageId: "message-request",
         },
@@ -315,7 +310,7 @@ describe("messaging another bot", () => {
     );
   });
 
-  it("does not exempt a terminal reply to another terminal reply", async () => {
+  it("allows a terminal reply to another terminal reply past the former limit", async () => {
     const harness = deps({
       hopBlocks: [
         {
@@ -323,7 +318,7 @@ describe("messaging another bot", () => {
           fromBotId: "bot-target",
           fromBotName: "Analyst",
           text: "finished",
-          hop: BOT_MESSAGE_MAX_HOPS,
+          hop: 20,
           intent: "result",
         },
       ],
@@ -335,11 +330,11 @@ describe("messaging another bot", () => {
       { bot_id: "bot-target", message: "acknowledged", intent: "result" },
       { allowTerminalSource: true },
     );
-    expect(sent.ok).toBe(false);
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(sent.ok).toBe(true);
+    expect(harness.tx.run.create).toHaveBeenCalledOnce();
   });
 
-  it("does not let a result label bypass the hop limit toward an unrelated bot", async () => {
+  it("allows a result update to an unrelated bot past the former limit", async () => {
     const harness = deps({
       bots: [
         { id: "bot-target", name: "Analyst", title: "", thread: { id: "thread-target" } },
@@ -351,7 +346,7 @@ describe("messaging another bot", () => {
           fromBotId: "bot-target",
           fromBotName: "Coordinator",
           text: "please finish",
-          hop: BOT_MESSAGE_MAX_HOPS,
+          hop: 20,
           intent: "request",
         },
       ],
@@ -362,11 +357,11 @@ describe("messaging another bot", () => {
       sender,
       { bot_id: "bot-other", message: "keep going", intent: "result" },
     );
-    expect(sent.ok).toBe(false);
-    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(sent.ok).toBe(true);
+    expect(harness.tx.run.create).toHaveBeenCalledOnce();
   });
 
-  it("keeps model-supplied status updates subject to the hop limit", async () => {
+  it("allows model-supplied status updates past the former limit", async () => {
     const harness = deps({
       hopBlocks: [
         {
@@ -374,7 +369,7 @@ describe("messaging another bot", () => {
           fromBotId: "bot-target",
           fromBotName: "Coordinator",
           text: "please finish",
-          hop: BOT_MESSAGE_MAX_HOPS,
+          hop: 20,
           intent: "request",
         },
       ],
@@ -385,7 +380,7 @@ describe("messaging another bot", () => {
       sender,
       { bot_id: "bot-target", message: "still working", intent: "status" },
     );
-    expect(sent.ok).toBe(false);
+    expect(sent.ok).toBe(true);
   });
 
   it("keeps a person-started chain going", async () => {

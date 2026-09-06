@@ -131,13 +131,7 @@ function formatApprovalAnswer(
 }
 
 function isWorkingStatus(status: string | undefined): boolean {
-  return (
-    status === "queued" ||
-    status === "leased" ||
-    status === "running" ||
-    status === "waiting_input" ||
-    status === "waiting_takeover"
-  );
+  return status === "queued" || status === "leased" || status === "running";
 }
 
 type NotificationRouteState = "loading" | "ready" | "failed";
@@ -340,6 +334,7 @@ function Thread() {
   const notificationThreadId = snap?.threadId ?? currentBot?.threadId;
   activeThreadId.current = notificationThreadId;
   const currentBotStatus = snap ? snap.run?.status : currentBot?.status;
+  const takeoverBlocked = currentBotStatus === "waiting_takeover";
   const hasLiveProgress = visibleMessages.some((message) => message.id.startsWith("progress:"));
   const workingGroupBots = useMemo(() => {
     if (!inGroup) return [];
@@ -1792,17 +1787,49 @@ function Thread() {
           ) : null}
         </View>
         {!inGroup ? (
-          <Link
-            href={{
-              pathname: "/computer",
-              params: { botId: botId ?? "", name: name ?? "Bot" },
-            }}
-            asChild
+          <View
+            testID={takeoverBlocked ? "blocked-run-notice" : undefined}
+            accessibilityRole={takeoverBlocked ? "alert" : undefined}
+            style={
+              takeoverBlocked
+                ? {
+                    marginTop: 16,
+                    borderWidth: 1,
+                    borderColor: "#6B4E1E",
+                    borderRadius: 16,
+                    backgroundColor: "#211B12",
+                    padding: 14,
+                  }
+                : undefined
+            }
           >
-            <Pressable style={{ marginTop: 16 }}>
-              <Text style={{ color: "#C9C9CE" }}>Open computer →</Text>
-            </Pressable>
-          </Link>
+            {takeoverBlocked ? (
+              <View style={{ marginBottom: 10 }}>
+                <Text style={{ color: "#ECECEE", fontSize: 14, fontWeight: "600" }}>
+                  {currentBot?.name ?? name ?? "This agent"} needs you
+                </Text>
+                <Text style={{ color: "#9A9AA0", fontSize: 13, marginTop: 2 }}>
+                  Open the computer to continue this task.
+                </Text>
+              </View>
+            ) : null}
+            <Link
+              href={{
+                pathname: "/computer",
+                params: { botId: botId ?? "", name: name ?? "Bot" },
+              }}
+              asChild
+            >
+              <Pressable
+                accessibilityRole="button"
+                style={takeoverBlocked ? undefined : { marginTop: 16 }}
+              >
+                <Text style={{ color: takeoverBlocked ? "#E9C46A" : "#C9C9CE" }}>
+                  {takeoverBlocked ? "Open computer" : "Open computer →"}
+                </Text>
+              </Pressable>
+            </Link>
+          </View>
         ) : null}
       </View>
       {markdownPreview && artifactTarget ? (
