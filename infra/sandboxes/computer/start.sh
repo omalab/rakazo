@@ -18,6 +18,21 @@ rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
 Xvfb :1 -screen 0 1280x800x24 -ac +extension RANDR +render -noreset >/tmp/rakazo/xvfb.log 2>&1 &
 XVFB_PID=$!
 
+shutdown() {
+  trap - TERM INT
+  # Docker image replacement must give Chromium time to commit cookies and profile state.
+  pkill -TERM -f '^/usr/lib/chromium/chromium' 2>/dev/null || true
+  for _ in $(seq 1 50); do
+    pgrep -f '^/usr/lib/chromium/chromium' >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  remaining="$(jobs -pr)"
+  [[ -z "$remaining" ]] || kill -TERM $remaining 2>/dev/null || true
+  wait 2>/dev/null || true
+  exit 0
+}
+trap shutdown TERM INT
+
 ready=0
 for _ in $(seq 1 100); do
   if xdpyinfo -display :1 >/dev/null 2>&1; then

@@ -2,8 +2,13 @@ import { spawnSync } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
 import { resolveSupervisorToken } from "@rakazo/core";
-import { describe, expect, it } from "vitest";
-import { resolveDockerSocketPath, supervisorApp, waitForScreenReady } from "./index.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  removeComputerContainer,
+  resolveDockerSocketPath,
+  supervisorApp,
+  waitForScreenReady,
+} from "./index.js";
 import {
   assertRequestIdentity,
   attemptComputerControl,
@@ -116,6 +121,35 @@ describe("sandbox supervisor Docker endpoint", () => {
     );
     expect(resolveDockerSocketPath({}, "win32")).toBe("//./pipe/docker_engine");
     expect(resolveDockerSocketPath({}, "linux")).toBe("/var/run/docker.sock");
+  });
+});
+
+describe("computer replacement", () => {
+  it("gracefully stops the computer before removing its container", async () => {
+    const calls: string[] = [];
+    const container = {
+      stop: vi.fn(async (options: { t: number }) => {
+        calls.push(`stop:${options.t}`);
+      }),
+      remove: vi.fn(async (options: { force: boolean }) => {
+        calls.push(`remove:${options.force}`);
+      }),
+    };
+
+    await removeComputerContainer(container);
+
+    expect(calls).toEqual(["stop:15", "remove:true"]);
+  });
+
+  it("does not force-remove a running computer when graceful shutdown fails", async () => {
+    const failure = new Error("Docker stop failed");
+    const container = {
+      stop: vi.fn().mockRejectedValue(failure),
+      remove: vi.fn(),
+    };
+
+    await expect(removeComputerContainer(container)).rejects.toBe(failure);
+    expect(container.remove).not.toHaveBeenCalled();
   });
 });
 

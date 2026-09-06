@@ -890,14 +890,14 @@ export function ShellPage() {
     return snap;
   }
 
-  async function refreshComputerScreen(id: string) {
-    if (!computerVisible.current) return null;
+  async function refreshComputerScreen(id: string, force = false) {
+    if (!force && !computerVisible.current) return null;
     const request = ++screenRequest.current;
     const screen = await rpc.computer.screenUrl({ botId: id }).catch(() => ({ url: null }));
     if (
       request !== screenRequest.current ||
       activeBotId.current !== id ||
-      !computerVisible.current
+      (!force && !computerVisible.current)
     ) {
       return null;
     }
@@ -2565,6 +2565,10 @@ export function ShellPage() {
         overlay: (needsTakeover && !blocked) || computer?.state !== "running",
         force: computer?.state !== "running",
       });
+      // The blocked-run CTA can open this overlay while the Computer panel is closed.
+      // Fetch its screen explicitly; the background refresh intentionally skips hidden
+      // computers so it does not allocate screen sessions for every visited bot.
+      await refreshComputerScreen(active.id, true);
       setComputerOpen(true);
     } catch {
       // computerError already set in bootComputer
