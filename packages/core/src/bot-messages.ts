@@ -60,17 +60,18 @@ export function resolveBotAddress<T extends BotAddress>(
   if (botId) return bots.find((bot) => bot.id === botId);
   const name = input.name?.trim();
   if (!name) return undefined;
+  const lower = name.toLowerCase();
+  const aliases = botNameAliases(lower);
+  if (aliases) {
+    const aliasMatches = bots.filter((bot) => aliases.has(bot.name.trim().toLowerCase()));
+    return aliasMatches.length === 1 ? aliasMatches[0] : undefined;
+  }
   const exact = bots.find((bot) => bot.name === name);
   if (exact) return exact;
-  const lower = name.toLowerCase();
   const matches = bots.filter((bot) => bot.name.toLowerCase() === lower);
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) return undefined;
-
-  const aliases = botNameAliases(lower);
-  if (!aliases) return undefined;
-  const aliasMatches = bots.filter((bot) => aliases.has(bot.name.trim().toLowerCase()));
-  return aliasMatches.length === 1 ? aliasMatches[0] : undefined;
+  return undefined;
 }
 
 function botNameAliases(name: string): ReadonlySet<string> | undefined {

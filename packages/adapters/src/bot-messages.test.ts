@@ -134,6 +134,30 @@ describe("messaging another bot", () => {
     expect(harness.enqueue).toHaveBeenCalledTimes(1);
   });
 
+  it("can route a space member to a teammate created by another member", async () => {
+    const harness = deps();
+
+    const sent = await messageBot(harness.deps, { ...run, userId: "requesting-member" }, sender, {
+      confirm_name: "Analyst",
+      message: "Review this for our shared space",
+    });
+
+    expect(sent.ok).toBe(true);
+    expect(harness.deps.prisma.bot.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { spaceId: "workspace-1", archivedAt: null },
+      }),
+    );
+    expect(harness.tx.bot.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "bot-target", spaceId: "workspace-1", archivedAt: null },
+      }),
+    );
+    expect(harness.tx.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ userId: "requesting-member" }) }),
+    );
+  });
+
   it("tells the sender to continue independent work", async () => {
     const harness = deps();
     const sent = await messageBot(harness.deps, run, sender, {
