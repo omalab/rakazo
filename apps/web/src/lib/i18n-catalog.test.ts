@@ -1,5 +1,5 @@
-import { i18n } from "@lingui/core";
 import { readFileSync } from "node:fs";
+import { i18n } from "@lingui/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import de from "../../scripts/translations-de.json";
 import hi from "../../scripts/translations-hi.json";
