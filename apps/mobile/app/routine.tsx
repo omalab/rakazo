@@ -2,7 +2,13 @@ import type { Routine } from "@rakazo/contracts";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
-import { rpc } from "../lib/api";
+import { messagingProviderLabel, rpc } from "../lib/api";
+
+function notificationSummary(routine: Routine): string {
+  if (!routine.notify) return "Off";
+  if (!routine.notificationTarget) return "Rakazo";
+  return `${messagingProviderLabel(routine.notificationTarget.provider)} · ${routine.notificationTarget.name}`;
+}
 
 export default function RoutineDetail() {
   const { botId, botName, routineId } = useLocalSearchParams<{
@@ -70,6 +76,12 @@ export default function RoutineDetail() {
               {routine.active ? "Active" : "Paused"} · {routine.crons.join(", ")} ·{" "}
               {routine.timezone}
             </Text>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 16 }}>
+              <Text style={{ color: "#85858A", fontSize: 14 }}>Updates</Text>
+              <Text style={{ color: "#DFDFE2", flexShrink: 1, fontSize: 14, textAlign: "right" }}>
+                {notificationSummary(routine)}
+              </Text>
+            </View>
           </View>
           <View style={{ gap: 8 }}>
             <Text style={{ color: "#85858A", fontSize: 13, textTransform: "uppercase" }}>

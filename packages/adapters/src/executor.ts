@@ -2790,7 +2790,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 await deps.prisma.bot.findMany({
                   where: {
                     spaceId: run.spaceId,
-                    userId: run.userId,
                     archivedAt: null,
                     id: { not: bot.id },
                     thread: { isNot: null },
@@ -2828,6 +2827,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 workspaceInstruction,
                 agentEnvironmentInstruction,
                 "A bot and a subagent are different. Never use both for the same request.",
+                run.trigger === "routine"
+                  ? "This is a scheduled routine. If nothing material changed and nobody needs to act or decide, finish silently. If there is an update, write a concise complete result; it may be delivered to an external team conversation."
+                  : undefined,
                 "create_space proposes a new privacy boundary inside the current organization. Use it when the user asks to create a space or separate data between teams or projects. It always pauses for explicit user approval; never claim the space exists before the tool succeeds.",
                 "spawn_bot creates a lasting regular bot (own chat, computer, memory) that appears in the user's bot list. If the user asked to create a bot, call spawn_bot once and stop. Do not run_subagent to demo it.",
                 "run_subagent is a short helper inside this turn only. It is not a bot, has no thread, and does not show in the list. Give it only the task-specific context it needs, set explicit tool-call and duration budgets, and treat an incomplete worker result as unfinished work.",
@@ -2863,7 +2865,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               workerModel,
               resumeFromCheckpoint: takeoverResume?.checkpoint,
               script,
-              allowSilentEmpty: allowSilentPeerMessage || messagingChannelRun,
+              allowSilentEmpty: runAllowsSilentCompletion(
+                run.trigger,
+                messagingChannelRun,
+                allowSilentPeerMessage,
+              ),
               emptyResponseText,
               executeTool: scripted ? undefined : applyTool,
               claimSteering: scripted
@@ -3218,7 +3224,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           flushPendingTools();
           if (!assembled) {
             messageSegments = completionMessageSegments(messageSegments, {
-              allowSilentEmpty: allowSilentPeerMessage || messagingChannelRun,
+              allowSilentEmpty: runAllowsSilentCompletion(
+                run.trigger,
+                messagingChannelRun,
+                allowSilentPeerMessage,
+              ),
               emptyResponseText,
               suppressOutput: handedOff,
               skipEmptyFallback: publishedTerminalSubagent,
@@ -3417,20 +3427,24 @@ async function computerScreenToolResult(
 
 export async function runNotificationsEnabled(
   prisma: PrismaClient,
-  run: { spaceId: string; userId: string; botId: string; threadId: string },
+  run: { id?: string; spaceId: string; userId: string; botId: string; threadId: string },
 ): Promise<boolean> {
   const source = await prisma.run.findFirst({
-    where: {
-      botId: run.botId,
-      threadId: run.threadId,
-      spaceId: run.spaceId,
-      userId: run.userId,
-    },
+    where: run.id
+      ? { id: run.id, spaceId: run.spaceId }
+      : {
+          botId: run.botId,
+          threadId: run.threadId,
+          spaceId: run.spaceId,
+          userId: run.userId,
+        },
     select: {
       bot: { select: { notifyOnFinish: true } },
       thread: { select: { groupId: true } },
+      routine: { select: { notify: true } },
     },
   });
+  if (source?.routine?.notify === false) return false;
   return Boolean(source && (source.thread.groupId || source.bot.notifyOnFinish));
 }
 
@@ -3535,6 +3549,14 @@ export function completionMessageSegments(
   }
   if (options?.allowSilentEmpty || options?.skipEmptyFallback) return [];
   return [{ kind: "text", text: fallback }];
+}
+
+export function runAllowsSilentCompletion(
+  trigger: string,
+  messagingChannelRun: boolean,
+  allowSilentPeerMessage: boolean,
+): boolean {
+  return trigger === "routine" || messagingChannelRun || allowSilentPeerMessage;
 }
 
 /** User-facing text for completion notifications; empty when only tool/step activity remains. */

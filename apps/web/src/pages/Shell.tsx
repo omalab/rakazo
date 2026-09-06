@@ -3651,6 +3651,9 @@ export function ShellPage() {
                 draft={routineDraft}
                 onChange={setRoutineDraft}
                 editing={editingRoutine}
+                notificationDestinations={externalConversations.filter(
+                  (conversation) => conversation.spaceId === active.spaceId,
+                )}
                 timezone={editingRoutine?.timezone ?? localTimezone()}
                 webhook={{
                   path:
@@ -3728,6 +3731,9 @@ export function ShellPage() {
                         prompt: routineDraft.prompt || t`Check in.`,
                         crons,
                         active: armOneShot ? true : routineDraft.active,
+                        notify: routineDraft.notify,
+                        notificationExternalConversationId:
+                          routineDraft.notificationExternalConversationId,
                         webhookEnabled: routineDraft.webhookEnabled,
                         ...(runAt ? { runAt } : {}),
                       });
@@ -3739,7 +3745,9 @@ export function ShellPage() {
                         crons,
                         timezone: localTimezone(),
                         active: routineDraft.active,
-                        notify: true,
+                        notify: routineDraft.notify,
+                        notificationExternalConversationId:
+                          routineDraft.notificationExternalConversationId,
                         webhookEnabled: routineDraft.webhookEnabled,
                       });
                     }

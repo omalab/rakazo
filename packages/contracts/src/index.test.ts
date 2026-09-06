@@ -9,6 +9,7 @@ import {
   BOT_TITLE_MAX_LENGTH,
   CreateBotInput,
   CreateGroupInput,
+  CreateRoutineInput,
   canReactToThreadMessage,
   ExternalConversationSchema,
   McpServerConfigInput,
@@ -17,6 +18,7 @@ import {
   normalizeCreateBotProfile,
   ProductEventType,
   ReorderBotsInput,
+  RoutineSchema,
   RunActivityRowSchema,
   RunSchema,
   UpdateBotInput,
@@ -66,6 +68,44 @@ describe("contracts", () => {
     const parsed = CreateBotInput.parse({ name: "Chief" });
     expect(parsed.title).toBe("");
     expect(parsed.notifyOnFinish).toBe(true);
+  });
+
+  it("keeps a routine notification destination provider-neutral", () => {
+    expect(
+      CreateRoutineInput.parse({
+        botId: "bot-james",
+        name: "Open asks",
+        prompt: "Report only material changes.",
+        crons: ["0 * * * *"],
+        notificationExternalConversationId: "conversation-arthur",
+      }),
+    ).toMatchObject({
+      notify: true,
+      notificationExternalConversationId: "conversation-arthur",
+    });
+
+    expect(
+      RoutineSchema.parse({
+        id: "routine-1",
+        botId: "bot-james",
+        name: "Open asks",
+        prompt: "Report only material changes.",
+        crons: ["0 * * * *"],
+        timezone: "UTC",
+        active: true,
+        notify: true,
+        notificationExternalConversationId: "conversation-arthur",
+        notificationTarget: {
+          id: "conversation-arthur",
+          provider: "slack",
+          name: "Leadership",
+        },
+        webhookEnabled: false,
+        lastRunAt: null,
+        nextRunAt: "2026-09-06T14:00:00.000Z",
+        createdAt: "2026-09-06T13:00:00.000Z",
+      }).notificationTarget,
+    ).toEqual({ id: "conversation-arthur", provider: "slack", name: "Leadership" });
   });
 
   it("normalizes bot creation fields without losing the longer instruction copy", () => {

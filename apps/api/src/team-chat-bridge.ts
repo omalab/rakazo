@@ -52,6 +52,9 @@ export function teamChatResponseText(
 }
 
 export function teamChatQuestionText(ask: Extract<MessageBlock, { kind: "ask" }>): string {
+  if (ask.approvalEffectId) {
+    return `${ask.text}\n\nOpen Rakazo to approve or deny this action.`;
+  }
   if (ask.input === "secret") {
     return `${ask.text}\n\nOpen Rakazo to answer this securely.`;
   }
@@ -59,6 +62,10 @@ export function teamChatQuestionText(ask: Extract<MessageBlock, { kind: "ask" }>
   return options.length > 0
     ? `${ask.text}\n\nReply with one of:\n${options.map((option) => `- ${option}`).join("\n")}`
     : ask.text;
+}
+
+export function teamChatCanAnswer(ask: Extract<MessageBlock, { kind: "ask" }>): boolean {
+  return ask.input !== "secret" && !ask.approvalEffectId;
 }
 
 export function teamChatAnswer(
@@ -319,6 +326,7 @@ export class TeamChatBridge {
     await this.deliverPendingInputs(target);
     await this.deliverPendingTakeovers(target);
     await this.deliverDelegatedReplies(target);
+    await this.deliverRoutineNotifications(target);
   }
 
   private async deliverPendingInputs(target: TargetBot): Promise<void> {
@@ -418,12 +426,14 @@ export class TeamChatBridge {
   }
 
   private async deliverDelegatedReplies(target: TargetBot): Promise<void> {
+    const staleClaim = new Date(Date.now() - INPUT_DELIVERY_RESERVATION_MS);
     const runs = await this.deps.prisma.run.findMany({
       where: {
         botId: target.id,
         trigger: "bot_message",
         status: { in: ["completed", "failed"] },
         teamChatMirroredAt: null,
+        OR: [{ teamChatInputClaimedAt: null }, { teamChatInputClaimedAt: { lte: staleClaim } }],
         thread: {
           externalConversation: {
             provider: this.deps.provider.id,
@@ -440,32 +450,144 @@ export class TeamChatBridge {
       },
     });
     for (const run of runs) {
-      const origin = await this.findExternalOrigin(run.sourceMessageId);
-      if (!origin) {
-        await this.markTeamChatMirrored(run.id);
-        continue;
-      }
-      const response =
-        run.status === "completed"
-          ? await this.deps.prisma.message.findFirst({
-              where: { runId: run.id, role: "bot" },
-              orderBy: { seq: "desc" },
-              select: { blocks: true },
-            })
-          : null;
-      const blocks = Array.isArray(response?.blocks) ? (response.blocks as MessageBlock[]) : [];
-      const content =
-        run.status === "failed"
-          ? `${target.name} could not complete the delegated request. Open Rakazo for details.`
-          : teamChatResponseText(blocks, target.name, true);
-      if (content) {
-        await this.deps.provider.send({
-          conversationId: origin.externalConversation.conversationId,
-          replyThreadId: origin.replyThreadId,
-          content,
+      const claimedAt = new Date();
+      const claimed = await this.deps.prisma.run.updateMany({
+        where: {
+          id: run.id,
+          status: run.status,
+          teamChatMirroredAt: null,
+          OR: [{ teamChatInputClaimedAt: null }, { teamChatInputClaimedAt: { lte: staleClaim } }],
+        },
+        data: { teamChatInputClaimedAt: claimedAt },
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        const origin = await this.findExternalOrigin(run.sourceMessageId);
+        if (origin) {
+          const response =
+            run.status === "completed"
+              ? await this.deps.prisma.message.findFirst({
+                  where: { runId: run.id, role: "bot" },
+                  orderBy: { seq: "desc" },
+                  select: { blocks: true },
+                })
+              : null;
+          const blocks = Array.isArray(response?.blocks) ? (response.blocks as MessageBlock[]) : [];
+          const content =
+            run.status === "failed"
+              ? `${target.name} could not complete the delegated request. Open Rakazo for details.`
+              : teamChatResponseText(blocks, target.name, true);
+          if (content) {
+            await this.deps.provider.send({
+              conversationId: origin.externalConversation.conversationId,
+              replyThreadId: origin.replyThreadId,
+              content,
+            });
+          }
+        }
+        await this.deps.prisma.run.updateMany({
+          where: {
+            id: run.id,
+            status: run.status,
+            teamChatMirroredAt: null,
+            teamChatInputClaimedAt: claimedAt,
+          },
+          data: { teamChatInputClaimedAt: null, teamChatMirroredAt: new Date() },
         });
+      } catch (error) {
+        await this.deps.prisma.run.updateMany({
+          where: { id: run.id, teamChatMirroredAt: null, teamChatInputClaimedAt: claimedAt },
+          data: { teamChatInputClaimedAt: null },
+        });
+        throw error;
       }
-      await this.markTeamChatMirrored(run.id);
+    }
+  }
+
+  private async deliverRoutineNotifications(target: TargetBot): Promise<void> {
+    const staleClaim = new Date(Date.now() - INPUT_DELIVERY_RESERVATION_MS);
+    const runs = await this.deps.prisma.run.findMany({
+      where: {
+        spaceId: target.spaceId,
+        trigger: "routine",
+        status: { in: ["completed", "failed"] },
+        teamChatMirroredAt: null,
+        OR: [{ teamChatInputClaimedAt: null }, { teamChatInputClaimedAt: { lte: staleClaim } }],
+        routine: {
+          notify: true,
+          notificationExternalConversation: {
+            provider: this.deps.provider.id,
+            botId: target.id,
+            spaceId: target.spaceId,
+          },
+        },
+      },
+      orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
+      take: BATCH_SIZE,
+      select: {
+        id: true,
+        status: true,
+        error: true,
+        bot: { select: { name: true } },
+        routine: {
+          select: {
+            name: true,
+            notificationExternalConversation: { select: { conversationId: true } },
+          },
+        },
+      },
+    });
+    for (const run of runs) {
+      const destination = run.routine?.notificationExternalConversation;
+      if (!run.routine || !destination) continue;
+      const claimedAt = new Date();
+      const claimed = await this.deps.prisma.run.updateMany({
+        where: {
+          id: run.id,
+          status: run.status,
+          teamChatMirroredAt: null,
+          OR: [{ teamChatInputClaimedAt: null }, { teamChatInputClaimedAt: { lte: staleClaim } }],
+        },
+        data: { teamChatInputClaimedAt: claimedAt },
+      });
+      if (claimed.count !== 1) continue;
+      try {
+        let content = "";
+        if (run.status === "completed") {
+          const response = await this.deps.prisma.message.findFirst({
+            where: { runId: run.id, role: "bot" },
+            orderBy: { seq: "desc" },
+            select: { blocks: true },
+          });
+          const blocks = Array.isArray(response?.blocks) ? (response.blocks as MessageBlock[]) : [];
+          const update = teamChatResponseText(blocks, run.bot.name, true);
+          if (update) content = `${run.bot.name} — ${run.routine.name}\n\n${update}`;
+        } else {
+          content = `${run.bot.name} could not complete ${run.routine.name}. Open Rakazo for details.`;
+        }
+        if (content) {
+          await this.deps.provider.send({
+            conversationId: destination.conversationId,
+            replyThreadId: null,
+            content,
+          });
+        }
+        await this.deps.prisma.run.updateMany({
+          where: {
+            id: run.id,
+            status: run.status,
+            teamChatMirroredAt: null,
+            teamChatInputClaimedAt: claimedAt,
+          },
+          data: { teamChatInputClaimedAt: null, teamChatMirroredAt: new Date() },
+        });
+      } catch (error) {
+        await this.deps.prisma.run.updateMany({
+          where: { id: run.id, teamChatMirroredAt: null, teamChatInputClaimedAt: claimedAt },
+          data: { teamChatInputClaimedAt: null },
+        });
+        throw error;
+      }
     }
   }
 
@@ -510,9 +632,35 @@ export class TeamChatBridge {
   private async findExternalOriginForRun(runId: string) {
     const run = await this.deps.prisma.run.findUnique({
       where: { id: runId },
-      select: { sourceMessageId: true },
+      select: {
+        sourceMessageId: true,
+        routine: {
+          select: {
+            notify: true,
+            notificationExternalConversation: {
+              select: { id: true, conversationId: true, provider: true, botId: true },
+            },
+          },
+        },
+      },
     });
-    return this.findExternalOrigin(run?.sourceMessageId ?? null);
+    const origin = await this.findExternalOrigin(run?.sourceMessageId ?? null);
+    if (origin) return origin;
+    const destination = run?.routine?.notificationExternalConversation;
+    if (
+      run?.routine?.notify &&
+      destination?.provider === this.deps.provider.id &&
+      destination.botId === this.target?.id
+    ) {
+      return {
+        replyThreadId: null,
+        externalConversation: {
+          id: destination.id,
+          conversationId: destination.conversationId,
+        },
+      };
+    }
+    return null;
   }
 
   private async pendingAsk(runId: string) {
@@ -530,13 +678,6 @@ export class TeamChatBridge {
       if (ask) return { messageId: message.id, ask };
     }
     return null;
-  }
-
-  private async markTeamChatMirrored(runId: string): Promise<void> {
-    await this.deps.prisma.run.updateMany({
-      where: { id: runId, teamChatMirroredAt: null },
-      data: { teamChatMirroredAt: new Date() },
-    });
   }
 
   private async evaluateAmbient(now: Date): Promise<void> {
@@ -801,11 +942,13 @@ export class TeamChatBridge {
       return true;
     }
     const candidate = candidates[0]!;
-    if (candidate.ask.input === "secret") {
+    if (!teamChatCanAnswer(candidate.ask)) {
       await this.rejectExternalAnswer(
         message.id,
         message,
-        "This answer is secret. Open Rakazo to provide it securely.",
+        candidate.ask.approvalEffectId
+          ? "Open Rakazo to approve or deny this action."
+          : "This answer is secret. Open Rakazo to provide it securely.",
       );
       return true;
     }

@@ -224,6 +224,135 @@ describeWithDatabase("Slack to Arthur to James delegation", () => {
     expect(provider.sent).toHaveLength(sentBefore + 1);
   });
 
+  it("delivers a scheduled James update and question through its configured Arthur conversation", async () => {
+    const owner = await prisma.bot.findUniqueOrThrow({
+      where: { id: arthur.id },
+      select: { spaceId: true, userId: true },
+    });
+    const conversation = await prisma.externalConversation.create({
+      data: {
+        provider: "slack",
+        workspaceId: "T-routine",
+        externalKey: "dm:scheduled-updates",
+        conversationId: "D-routine",
+        displayName: "Operations updates",
+        participantNames: ["Ada", "Arthur"],
+        spaceId: owner.spaceId,
+        botId: arthur.id,
+        userId: owner.userId,
+        thread: { create: { spaceId: owner.spaceId, userId: owner.userId } },
+      },
+    });
+    const routine = await prisma.routine.create({
+      data: {
+        spaceId: owner.spaceId,
+        botId: james.id,
+        userId: owner.userId,
+        name: "Slack open-ask chase",
+        prompt: "Report only material changes.",
+        crons: ["0 * * * *"],
+        timezone: "UTC",
+        active: false,
+        notify: true,
+        notificationExternalConversationId: conversation.id,
+      },
+    });
+    const task = await prisma.task.create({
+      data: {
+        spaceId: owner.spaceId,
+        botId: james.id,
+        userId: owner.userId,
+        threadId: (
+          await prisma.bot.findUniqueOrThrow({
+            where: { id: james.id },
+            select: { thread: { select: { id: true } } },
+          })
+        ).thread!.id,
+        prompt: routine.prompt,
+        status: "completed",
+      },
+    });
+    const run = await prisma.run.create({
+      data: {
+        spaceId: owner.spaceId,
+        botId: james.id,
+        userId: owner.userId,
+        threadId: task.threadId,
+        taskId: task.id,
+        routineId: routine.id,
+        trigger: "routine",
+        status: "completed",
+      },
+    });
+    await createThreadMessage(prisma, {
+      threadId: run.threadId,
+      role: "bot",
+      blocks: [{ kind: "text", text: "Two overdue asks need owners." }],
+      botId: james.id,
+      runId: run.id,
+    });
+
+    const sentBefore = provider.sent.length;
+    await bridge.reconcileOnce();
+    await bridge.reconcileOnce();
+
+    expect(provider.sent.slice(sentBefore)).toEqual([
+      {
+        conversationId: "D-routine",
+        replyThreadId: null,
+        content: "James Baker — Slack open-ask chase\n\nTwo overdue asks need owners.",
+      },
+    ]);
+    expect(await prisma.run.findUniqueOrThrow({ where: { id: run.id } })).toMatchObject({
+      teamChatMirroredAt: expect.any(Date),
+    });
+
+    const questionTask = await prisma.task.create({
+      data: {
+        spaceId: owner.spaceId,
+        botId: james.id,
+        userId: owner.userId,
+        threadId: task.threadId,
+        prompt: "Prepare the weekly plan without losing this objective.",
+        status: "running",
+      },
+    });
+    const questionRun = await prisma.run.create({
+      data: {
+        spaceId: owner.spaceId,
+        botId: james.id,
+        userId: owner.userId,
+        threadId: task.threadId,
+        taskId: questionTask.id,
+        routineId: routine.id,
+        trigger: "routine",
+        status: "running",
+        leaseOwner: "test-worker",
+        leaseFence: 1,
+      },
+    });
+    const attempt = await prisma.attempt.create({
+      data: { runId: questionRun.id, fence: 1, status: "running" },
+    });
+    await pauseRunForInput(prisma, {
+      spaceId: owner.spaceId,
+      threadId: task.threadId,
+      botId: james.id,
+      runId: questionRun.id,
+      attemptId: attempt.id,
+      leaseOwner: "test-worker",
+      leaseFence: 1,
+      blocks: [{ kind: "ask", text: "Which owner should take this?", status: "pending" }],
+    });
+
+    await bridge.reconcileOnce();
+    expect(provider.sent.at(-1)).toEqual({
+      conversationId: "D-routine",
+      replyThreadId: null,
+      content: "Which owner should take this?",
+    });
+  });
+
   async function dispatch(
     eventId: string,
     replyThreadId: string,

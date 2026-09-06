@@ -26,6 +26,7 @@ type RoutineManifest = {
   timezone?: string;
   active?: boolean;
   notify?: boolean;
+  notificationExternalConversationId?: string | null;
   webhookEnabled?: boolean;
 };
 
@@ -71,6 +72,7 @@ type ResolvedRoutine = {
   timezone: string;
   active: boolean;
   notify: boolean;
+  notificationExternalConversationId: string | null;
   webhookEnabled: boolean;
   nextRunAt: Date | null;
 };
@@ -98,6 +100,7 @@ type ImportPlan = {
             timezone: string;
             active: boolean;
             notify: boolean;
+            notificationExternalConversationId: string | null;
             webhookEnabled: boolean;
             nextRunAt: string | null;
           };
@@ -299,6 +302,7 @@ export function resolveRoutine(routine: RoutineManifest, allowActive: boolean): 
     timezone,
     active,
     notify: routine.notify ?? true,
+    notificationExternalConversationId: routine.notificationExternalConversationId?.trim() || null,
     webhookEnabled,
     nextRunAt,
   };
@@ -328,6 +332,26 @@ export async function buildImportPlan(
   );
   const routines = manifest.routines.map((routine) => resolveRoutine(routine, options.allowActive));
 
+  for (const conversationId of new Set(
+    routines
+      .map((routine) => routine.notificationExternalConversationId)
+      .filter((id): id is string => Boolean(id)),
+  )) {
+    const conversation = await prisma.externalConversation.findFirst({
+      where: {
+        id: conversationId,
+        spaceId: bot.spaceId,
+        bot: { archivedAt: null },
+      },
+      select: { id: true },
+    });
+    if (!conversation) {
+      throw new Error(
+        `Routine notification destination ${conversationId} was not found in the destination space.`,
+      );
+    }
+  }
+
   const skillPlan = [];
   for (const skill of skills) {
     const existing = await prisma.agentSkill.findFirst({
@@ -356,6 +380,7 @@ export async function buildImportPlan(
         timezone: true,
         active: true,
         notify: true,
+        notificationExternalConversationId: true,
         webhookEnabled: true,
         nextRunAt: true,
       },
@@ -388,6 +413,7 @@ export async function buildImportPlan(
               timezone: existing.timezone,
               active: existing.active,
               notify: existing.notify,
+              notificationExternalConversationId: existing.notificationExternalConversationId,
               webhookEnabled: existing.webhookEnabled,
               nextRunAt: existing.nextRunAt?.toISOString() ?? null,
             },
@@ -493,6 +519,7 @@ export async function applyImport(
         timezone: routine.timezone,
         active: routine.active,
         notify: routine.notify,
+        notificationExternalConversationId: routine.notificationExternalConversationId,
         webhookEnabled: routine.webhookEnabled,
         nextRunAt: routine.nextRunAt,
       };

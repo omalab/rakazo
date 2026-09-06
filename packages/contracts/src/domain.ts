@@ -352,6 +352,14 @@ export const RoutineSchema = z.object({
   timezone: z.string(),
   active: z.boolean(),
   notify: z.boolean(),
+  notificationExternalConversationId: Id.nullable(),
+  notificationTarget: z
+    .object({
+      id: Id,
+      provider: z.string(),
+      name: z.string(),
+    })
+    .nullable(),
   webhookEnabled: z.boolean(),
   lastRunAt: z.string().nullable(),
   nextRunAt: z.string().nullable(),
@@ -367,6 +375,7 @@ export const CreateRoutineInput = z
     crons: z.array(z.string().min(1)).default([]),
     timezone: z.string().default("UTC"),
     notify: z.boolean().default(true),
+    notificationExternalConversationId: Id.nullable().default(null),
     active: z.boolean().default(false),
     webhookEnabled: z.boolean().default(false),
   })
