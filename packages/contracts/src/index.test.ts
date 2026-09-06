@@ -65,9 +65,20 @@ describe("contracts", () => {
   });
 
   it("parses bot create input", () => {
-    const parsed = CreateBotInput.parse({ name: "Chief" });
+    const parsed = CreateBotInput.parse({
+      name: "Chief",
+      modelProvider: "xai",
+      modelId: "grok-4.6",
+      thinkingLevel: "high",
+    });
     expect(parsed.title).toBe("");
     expect(parsed.notifyOnFinish).toBe(true);
+    expect(parsed).toMatchObject({
+      modelProvider: "xai",
+      modelId: "grok-4.6",
+      thinkingLevel: "high",
+    });
+    expect(CreateBotInput.safeParse({ name: "Chief", modelId: "grok-4.6" }).success).toBe(false);
   });
 
   it("keeps a routine notification destination provider-neutral", () => {

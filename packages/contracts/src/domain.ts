@@ -275,15 +275,48 @@ export const BOT_DESCRIPTION_MAX_LENGTH = 4000;
 export const BOT_INSTRUCTIONS_MAX_LENGTH = 20000;
 export const BOT_TEAM_CHAT_RULES_MAX_LENGTH = TEAM_CHAT_RULES_MAX_LENGTH;
 
-export const CreateBotInput = z.object({
-  name: z.string().trim().min(1).max(BOT_NAME_MAX_LENGTH),
-  title: z.string().max(BOT_TITLE_MAX_LENGTH).default(""),
-  description: z.string().max(BOT_DESCRIPTION_MAX_LENGTH).default(""),
-  instructions: z.string().max(BOT_INSTRUCTIONS_MAX_LENGTH).default(""),
-  notifyOnFinish: z.boolean().default(true),
-  color: z.string().optional(),
-  computerMode: ComputerModeSchema.default("team"),
-});
+type ModelOverridePair = {
+  modelProvider?: string | null;
+  modelId?: string | null;
+};
+
+function validateModelOverridePair(value: ModelOverridePair, ctx: z.RefinementCtx) {
+  const providerProvided = value.modelProvider !== undefined;
+  const modelProvided = value.modelId !== undefined;
+  if (!providerProvided && !modelProvided) return;
+  if (providerProvided !== modelProvided) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Model provider and model id must both be set or both cleared",
+      path: ["modelId"],
+    });
+    return;
+  }
+  const bothNull = value.modelProvider === null && value.modelId === null;
+  const bothSet = Boolean(value.modelProvider) && Boolean(value.modelId);
+  if (!bothNull && !bothSet) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Model provider and model id must both be set or both cleared",
+      path: ["modelId"],
+    });
+  }
+}
+
+export const CreateBotInput = z
+  .object({
+    name: z.string().trim().min(1).max(BOT_NAME_MAX_LENGTH),
+    title: z.string().max(BOT_TITLE_MAX_LENGTH).default(""),
+    description: z.string().max(BOT_DESCRIPTION_MAX_LENGTH).default(""),
+    instructions: z.string().max(BOT_INSTRUCTIONS_MAX_LENGTH).default(""),
+    notifyOnFinish: z.boolean().default(true),
+    color: z.string().optional(),
+    computerMode: ComputerModeSchema.default("team"),
+    modelProvider: z.string().trim().min(1).max(80).nullable().optional(),
+    modelId: z.string().trim().min(1).max(200).nullable().optional(),
+    thinkingLevel: ThinkingLevelSchema.nullable().optional(),
+  })
+  .superRefine(validateModelOverridePair);
 export type CreateBotInput = z.infer<typeof CreateBotInput>;
 
 export function normalizeCreateBotProfile(
@@ -318,30 +351,7 @@ export const UpdateBotInput = z
     teamChatAmbientEnabled: z.boolean().optional(),
     teamChatRules: z.string().max(BOT_TEAM_CHAT_RULES_MAX_LENGTH).optional(),
   })
-  .superRefine((value, ctx) => {
-    const providerProvided = value.modelProvider !== undefined;
-    const modelProvided = value.modelId !== undefined;
-    if (!providerProvided && !modelProvided) return;
-    // Reject partial shapes like `{ modelId: null }` (provider omitted) so a
-    // clear cannot succeed without updating both persisted fields.
-    if (providerProvided !== modelProvided) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Model provider and model id must both be set or both cleared",
-        path: ["modelId"],
-      });
-      return;
-    }
-    const bothNull = value.modelProvider === null && value.modelId === null;
-    const bothSet = Boolean(value.modelProvider) && Boolean(value.modelId);
-    if (!bothNull && !bothSet) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Model provider and model id must both be set or both cleared",
-        path: ["modelId"],
-      });
-    }
-  });
+  .superRefine(validateModelOverridePair);
 
 export const RoutineSchema = z.object({
   id: Id,
