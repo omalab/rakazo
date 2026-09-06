@@ -32,6 +32,7 @@ import {
   ATTACHMENT_ALLOWED_MIME_TYPES,
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_COUNT,
+  BOT_COLORS,
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
   BOT_TITLE_MAX_LENGTH,
@@ -5989,6 +5990,7 @@ function BotSettings({
     title?: string;
     description?: string;
     instructions?: string;
+    color?: string;
     computerMode: ComputerMode;
     memoryScope?: "isolated" | "shared" | null;
     autoSpeak?: boolean;
@@ -6007,6 +6009,7 @@ function BotSettings({
   const [name, setName] = useState(bot.name);
   const [title, setTitle] = useState(bot.title);
   const [description, setDescription] = useState(bot.description);
+  const [color, setColor] = useState(bot.color);
   const [computerMode, setComputerMode] = useState(bot.computerMode);
   const [memoryScope, setMemoryScope] = useState(bot.memoryScope);
   const [autoSpeak, setAutoSpeak] = useState(bot.autoSpeak);
@@ -6093,12 +6096,54 @@ function BotSettings({
         )
       : undefined;
   const thinkingOptions = (effectiveEntry?.thinkingLevels ?? []).filter((level) => level !== "off");
+  const colorOptions = [
+    { value: BOT_COLORS[0], label: t`Teal` },
+    { value: BOT_COLORS[1], label: t`Orange` },
+    { value: BOT_COLORS[2], label: t`Indigo` },
+    { value: BOT_COLORS[3], label: t`Purple` },
+    { value: BOT_COLORS[4], label: t`Blue` },
+    { value: BOT_COLORS[5], label: t`Coral` },
+    { value: BOT_COLORS[6], label: t`Pink` },
+  ];
 
   return (
     <div data-testid="bot-settings">
       <div className="flex justify-center">
-        <BotAvatar color={bot.color} identity={bot.id} size={64} status={bot.status} />
+        <BotAvatar color={color} identity={bot.id} size={64} status={bot.status} />
       </div>
+      <fieldset className="mt-5">
+        <legend className="text-[14px] text-[var(--rk-muted)]">
+          <Trans>Agent color</Trans>
+        </legend>
+        <div className="mt-3 flex flex-wrap justify-center gap-2.5">
+          {colorOptions.map((option) => {
+            const selected = color === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                aria-label={option.label}
+                aria-pressed={selected}
+                title={option.label}
+                onClick={() => setColor(option.value)}
+                className={`grid h-9 w-9 place-items-center rounded-full border transition-transform hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--rk-ink)] motion-reduce:transition-none ${
+                  selected
+                    ? "border-white ring-2 ring-[var(--rk-muted-2)] ring-offset-2 ring-offset-[var(--rk-page)]"
+                    : "border-white/20"
+                }`}
+                style={{ backgroundColor: option.value }}
+              >
+                {selected ? (
+                  <span
+                    aria-hidden="true"
+                    className="h-2.5 w-2.5 rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,.45)]"
+                  />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
       <label className="mt-6 block text-[14px] text-[var(--rk-muted)]">
         <Trans>Name</Trans>
         <input
@@ -6276,6 +6321,7 @@ function BotSettings({
               title,
               description,
               instructions: description,
+              color,
               computerMode,
               memoryScope,
               autoSpeak,

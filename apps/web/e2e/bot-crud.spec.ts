@@ -61,14 +61,22 @@ test("bot creation, editing, and deletion persist", async ({ page }, testInfo) =
     "Finds reliable sources and turns them into concise briefs.",
   );
   const settings = page.getByTestId("bot-settings");
+  const agentColor = settings.getByRole("group", { name: "Agent color" });
   const modelSelect = settings.locator("label:has-text('Model') select");
   const teamComputer = settings.getByRole("button", { name: "Team" });
   const openWork = settings.getByTestId("bot-scratchpad");
+  await expect(agentColor).toBeVisible();
+  await expect(agentColor.getByRole("button")).toHaveCount(7);
+  await agentColor.getByRole("button", { name: "Pink" }).click();
+  await expect(agentColor.getByRole("button", { name: "Pink" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await expect(teamComputer).toBeHidden();
   await expect(modelSelect).toBeHidden();
   await expect(openWork).toBeHidden();
   await expect(settings.getByRole("button", { name: "Save", exact: true })).toBeVisible();
-  await captureScreenshot(page, testInfo, "27a-settings-panel");
+  await captureScreenshot(page, testInfo, "27a-agent-color-picker");
   await settings.getByText("Advanced", { exact: true }).click();
   await expect(teamComputer).toBeVisible();
   await expect(openWork).toBeVisible();
@@ -94,6 +102,7 @@ test("bot creation, editing, and deletion persist", async ({ page }, testInfo) =
   await captureScreenshot(page, testInfo, "27b-computer-panel");
   await page.getByRole("button", { name: "Show settings" }).click();
 
+  await agentColor.getByRole("button", { name: "Pink" }).click();
   await nameInput.fill("Atlas");
   await titleInput.fill("Research lead");
   await descriptionInput.fill("Builds durable, source-backed research briefs.");
@@ -109,6 +118,10 @@ test("bot creation, editing, and deletion persist", async ({ page }, testInfo) =
   await expect(nameInput).toHaveValue("Atlas");
   await expect(titleInput).toHaveValue("Research lead");
   await expect(descriptionInput).toHaveValue("Builds durable, source-backed research briefs.");
+  await expect(agentColor.getByRole("button", { name: "Pink" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await captureScreenshot(page, testInfo, "29-reloaded-bot-profile");
 
   const atlas = botList.getByRole("button", { name: /^Atlas/ });
