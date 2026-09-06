@@ -191,6 +191,7 @@ describe("graphical computer spec", () => {
       "dolt",
       "uv",
       "bun",
+      "composio",
       "chromium",
       "python3",
       "curl",
@@ -199,7 +200,11 @@ describe("graphical computer spec", () => {
     }
     expect(dockerfile).toContain("ca-certificates");
     expect(dockerfile).toContain("process.versions.node");
-    expect(dockerfile).toContain('PATH="$HOME/.bun/bin:$PATH"');
+    expect(dockerfile).toContain("COMPOSIO_CLI_VERSION=0.4.1");
+    expect(dockerfile).toContain("/usr/local/bin/composio");
+    expect(dockerfile).toContain("composio --version");
+    expect(dockerfile).toContain("/etc/profile.d/rakazo-path.sh");
+    expect(dockerfile).toContain("$HOME/.local/bin:$HOME/.bun/bin:$PATH");
     expect(COMPUTER_PATH).toContain("/home/rakazo/.local/bin");
     expect(COMPUTER_PATH).toContain("/home/rakazo/.bun/bin");
     expect(start).toContain("$AGENT_HOME/.local/bin:$AGENT_HOME/.bun/bin:");
