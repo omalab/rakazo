@@ -1,4 +1,5 @@
 import { i18n } from "@lingui/core";
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 import de from "../../scripts/translations-de.json";
 import hi from "../../scripts/translations-hi.json";
@@ -23,6 +24,34 @@ describe("lingui catalogs", () => {
         message: "Cancel new bot",
       }),
     ).toBe("Cancel new bot");
+  });
+
+  it("ships readable people-management copy in every catalog", () => {
+    for (const locale of ["en", "de", "hi", "ko", "pt-BR", "tr", "zh-CN"]) {
+      const catalog = readFileSync(
+        new URL(`../locales/${locale}/messages.po`, import.meta.url),
+        "utf8",
+      );
+
+      for (const message of [
+        "People",
+        "Loading people",
+        "Existing account email",
+        "Add person",
+        "Adding…",
+        "Access added",
+        "Could not load people",
+        "Could not add this person",
+      ]) {
+        const entryStart = `msgid "${message}"\nmsgstr "`;
+        const entryIndex = catalog.indexOf(entryStart);
+        expect(entryIndex, `${locale}: ${message}`).toBeGreaterThanOrEqual(0);
+        expect(
+          catalog.slice(entryIndex + entryStart.length).split('"', 1)[0],
+          `${locale}: ${message}`,
+        ).not.toBe("");
+      }
+    }
   });
 
   it("formats ICU cron-style messages with reordered placeholders", () => {
